@@ -40,7 +40,7 @@ export default function SidebarLayout({
 
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-50 w-72 transform border-r shadow-xl transition-transform duration-300 lg:translate-x-0 lg:shadow-none lg:h-screen lg:sticky lg:top-0 ${
+      className={`fixed inset-y-0 left-0 z-50 w-64 transform border-r shadow-xl transition-transform duration-300 lg:translate-x-0 lg:shadow-none lg:h-screen lg:sticky lg:top-0 ${
         showSidebarMobile ? "translate-x-0" : "-translate-x-full"
       }`}
       style={{
@@ -50,9 +50,9 @@ export default function SidebarLayout({
       aria-hidden={!showSidebarMobile}
     >
       {/* HEADER LOGO */}
-      <div className="p-8 flex items-center gap-3">
+      <div className="p-5 flex items-center gap-2.5">
         <div
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-xl font-bold "
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md"
           style={{ background: "transparent" }}
         >
           <img
@@ -62,16 +62,16 @@ export default function SidebarLayout({
           />
         </div>
         <div className="leading-tight">
-          <p className="text-[15px] font-bold text-white">Desa Tani Indah</p>
-          <p className="text-[10px] mt-1 font-bold text-white/70">
+          <p className="text-[13px] font-bold text-white">Desa Tani Indah</p>
+          <p className="text-[9px] mt-0.5 font-bold text-white/70">
             Sistem Koperasi Terpadu
           </p>
         </div>
       </div>
 
       {/* NAVIGASI UTAMA */}
-      <nav className="flex-1 mt-2">
-        <ul className="space-y-1">
+      <nav className="flex-1 mt-1">
+        <ul className="space-y-0.5">
           {navItems.map((item) => {
             const active = pathname === item.href;
             const Icon = item.icon;
@@ -79,14 +79,14 @@ export default function SidebarLayout({
               <li key={item.href}>
                 <Link
                   href={item.href}
-                  className={`group relative flex items-center gap-4 py-3.5 px-8 text-[15px] font-medium transition-all ${
+                  className={`group relative flex items-center gap-3 py-2.5 px-6 text-[13px] font-medium transition-all ${
                     active
                       ? "bg-white/20 text-white"
                       : "text-white/70 hover:bg-white/10 hover:text-white"
                   }`}
                 >
                   <Icon
-                    size={22}
+                    size={18}
                     strokeWidth={active ? 2.5 : 2}
                     className={
                       active
@@ -111,13 +111,13 @@ export default function SidebarLayout({
       </nav>
 
       {/* NAVIGASI BAWAH (Bantuan & Keluar) */}
-      <div className="mt-auto p-6 space-y-2">
+      <div className="mt-auto p-4 space-y-1">
         <Link
           href="/dashboard/bantuan"
-          className="flex items-center gap-4 py-3 px-2 text-[15px] font-medium text-white/70 hover:text-white transition-colors"
+          className="flex items-center gap-3 py-2.5 px-2 text-[13px] font-medium text-white/70 hover:text-white transition-colors"
         >
           <HelpCircle
-            size={22}
+            size={18}
             className="text-white/50"
             style={{ color: "rgba(255,255,255,0.5)" }}
           />
@@ -126,9 +126,9 @@ export default function SidebarLayout({
 
         <button
           type="button"
-          className="w-full flex items-center gap-4 py-3 px-2 text-[15px] font-medium text-white/70 hover:text-white transition-colors"
+          className="w-full flex items-center gap-3 py-2.5 px-2 text-[13px] font-medium text-white/70 hover:text-white transition-colors"
         >
-          <LogOut size={22} className="text-white/50" />
+          <LogOut size={18} className="text-white/50" />
           <span>Keluar</span>
         </button>
       </div>

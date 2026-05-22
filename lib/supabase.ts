@@ -1,13 +1,44 @@
+// lib/supabase.ts
+// Inisialisasi Supabase client untuk server dan browser
+
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "./types";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
+import type { Database } from "./supabase-types";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-if (!supabaseUrl || !supabaseKey) {
-  throw new Error(
-    "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY environment variables",
-  );
+// Client untuk browser (komponen client-side)
+export const supabaseBrowser = createClient<Database>(
+  supabaseUrl,
+  supabaseAnonKey,
+);
+
+// Client untuk server (API routes, Server Components)
+export async function createSupabaseServerClient() {
+  const cookieStore = await cookies();
+  return createServerClient<Database>(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options),
+          );
+        } catch {
+          // Server Component context tidak bisa set cookies — aman diabaikan
+        }
+      },
+    },
+  });
 }
 
-export const supabase = createClient<Database>(supabaseUrl, supabaseKey);
+// Client admin (hanya untuk operasi server-side sensitif)
+export const supabaseAdmin = createClient<Database>(
+  supabaseUrl,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  { auth: { autoRefreshToken: false, persistSession: false } },
+);

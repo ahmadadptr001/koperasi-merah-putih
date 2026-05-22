@@ -1,81 +1,112 @@
+// app/api/members/route.ts
+
 import { NextRequest } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { createSupabaseServerClient } from "@/lib/supabase";
 import {
-  ok,
-  okList,
-  created,
-  badRequest,
-  serverError,
-} from "@/lib/api-response";
-import type { MemberInsert } from "@/lib/types";
+  successResponse,
+  errorResponse,
+  handleApiError,
+  requireAdminOrPengurus,
+  parsePagination,
+} from "@/lib/api-helpers";
+import type { MemberInsert } from "@/types/database";
 
 // GET /api/members
-// Query params: status, member_type, area, search, user_id
+// Query params: page, pageSize, search, status
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const status = searchParams.get("status");
-    const member_type = searchParams.get("member_type");
-    const area = searchParams.get("area");
-    const search = searchParams.get("search");
-    const user_id = searchParams.get("user_id");
+    await requireAdminOrPengurus();
 
-    let query = supabase
-      .from("members")
-      .select("*, savings_accounts(total_balance)", { count: "exact" })
-      .order("created_at", { ascending: false });
+    const url = new URL(req.url);
+    const { page, pageSize, from, to } = parsePagination(url);
+    const search = url.searchParams.get("search") || "";
+    const status = url.searchParams.get("status");
+    const sortBy = url.searchParams.get("sortBy") || "created_at";
+    const sortOrder = url.searchParams.get("sortOrder") !== "asc";
 
-    if (status) query = query.eq("status", status);
-    if (member_type) query = query.eq("member_type", member_type);
-    if (area) query = query.eq("area", area);
-    if (user_id) query = query.eq("user_id", user_id);
+    const supabase = await createSupabaseServerClient();
+    let query = supabase.from("members").select(
+      `
+        *,
+        user:users(id, email, role, is_active),
+        savings_accounts(id, account_type, balance, status)
+      `,
+      { count: "exact" },
+    );
+
     if (search) {
       query = query.or(
-        `name.ilike.%${search}%,member_code.ilike.%${search}%,nik.ilike.%${search}%`,
+        `full_name.ilike.%${search}%,member_number.ilike.%${search}%,nik.ilike.%${search}%,phone.ilike.%${search}%`,
       );
     }
+    if (status) {
+      query = query.eq("status", status);
+    }
 
-    const { data, error, count } = await query;
-    if (error) return serverError(error);
-    return okList(data ?? [], count ?? 0);
+    const { data, error, count } = await query
+      .order(sortBy, { ascending: !sortOrder })
+      .range(from, to);
+
+    if (error) return errorResponse(error.message);
+
+    return successResponse({
+      data,
+      total: count ?? 0,
+      page,
+      pageSize,
+      totalPages: Math.ceil((count ?? 0) / pageSize),
+    });
   } catch (err) {
-    return serverError(err);
+    return handleApiError(err);
   }
 }
 
 // POST /api/members
 export async function POST(req: NextRequest) {
   try {
+    const { profile } = await requireAdminOrPengurus();
+
     const body: MemberInsert = await req.json();
 
-    if (!body.member_code || !body.nik || !body.name) {
-      return badRequest("Field member_code, nik, dan name wajib diisi");
+    // Validasi wajib
+    if (!body.full_name?.trim()) {
+      return errorResponse("Nama lengkap wajib diisi", 400);
     }
 
-    // Insert member
-    const { data: member, error: memberErr } = await supabase
+    const supabase = await createSupabaseServerClient();
+
+    // Generate nomor anggota otomatis jika tidak ada
+    let memberNumber = body.member_number;
+    if (!memberNumber) {
+      const { data: numData } = await supabase.rpc("generate_member_number");
+      memberNumber = numData as string;
+    }
+
+    // Cek duplikasi NIK
+    if (body.nik) {
+      const { data: existing } = await supabase
+        .from("members")
+        .select("id")
+        .eq("nik", body.nik)
+        .single();
+      if (existing) return errorResponse("NIK sudah terdaftar", 409);
+    }
+
+    const { data, error } = await supabase
       .from("members")
-      .insert(body)
-      .select()
+      .insert({
+        ...body,
+        member_number: memberNumber,
+        created_by: profile.id,
+        status: body.status || "active",
+      })
+      .select(`*, user:users(id, email, role)`)
       .single();
 
-    if (memberErr || !member) return serverError(memberErr);
+    if (error) return errorResponse(error.message);
 
-    // Auto-create savings account untuk member baru
-    const { error: savErr } = await supabase.from("savings_accounts").insert({
-      member_id: member.id,
-      balance_pokok: 0,
-      balance_wajib: 0,
-      balance_sukarela: 0,
-      total_balance: 0,
-    });
-
-    if (savErr) {
-      console.error("[Auto savings account] Failed:", savErr.message);
-    }
-
-    return created(member, "Anggota berhasil didaftarkan");
+    return successResponse(data, "Anggota berhasil ditambahkan", 201);
   } catch (err) {
-    return serverError(err);
+    return handleApiError(err);
   }
 }

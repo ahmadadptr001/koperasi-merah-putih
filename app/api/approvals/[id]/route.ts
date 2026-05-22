@@ -1,99 +1,126 @@
-import { NextRequest } from "next/server";
-import { supabase } from "@/lib/supabase";
-import { ok, notFound, badRequest, serverError } from "@/lib/api-response";
-import type { ApprovalUpdate } from "@/lib/types";
+// app/api/approvals/[id]/route.ts
 
-type Params = { params: { id: string } };
+import { NextRequest } from "next/server";
+import { createSupabaseServerClient } from "@/lib/supabase";
+import {
+  successResponse,
+  errorResponse,
+  notFoundResponse,
+  handleApiError,
+  requireAuth,
+  getUserProfile,
+  requireAdminOrPengurus,
+} from "@/lib/api-helpers";
 
 // GET /api/approvals/[id]
-export async function GET(_req: NextRequest, { params }: Params) {
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
   try {
+    const { id } = await params;
+    const authUser = await requireAuth();
+    const profile = await getUserProfile(authUser.id);
+
+    const supabase = await createSupabaseServerClient();
     const { data, error } = await supabase
       .from("approvals")
       .select(
         `
         *,
-        members(id, member_code, name, phone, address),
-        users!approvals_reviewed_by_fkey(id, name, role)
+        requester:users!approvals_requested_by_fkey(id, full_name, email, role),
+        reviewer:users!approvals_reviewed_by_fkey(id, full_name)
       `,
       )
-      .eq("id", params.id)
+      .eq("id", id)
       .single();
 
-    if (error || !data) return notFound();
-    return ok(data);
+    if (error || !data) return notFoundResponse("Permohonan");
+
+    // Anggota hanya lihat pengajuan miliknya
+    if (profile?.role === "anggota" && data.requested_by !== authUser.id) {
+      return errorResponse("Akses ditolak", 403);
+    }
+
+    return successResponse(data);
   } catch (err) {
-    return serverError(err);
+    return handleApiError(err);
   }
 }
 
-// PUT /api/approvals/[id]
-// Untuk review (approve/reject/revision) maupun update dokumen
-export async function PUT(req: NextRequest, { params }: Params) {
+// PUT /api/approvals/[id] — Review (approve/reject)
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
   try {
-    const body: ApprovalUpdate = await req.json();
-    if (Object.keys(body).length === 0)
-      return badRequest("Tidak ada field yang diupdate");
+    const { id } = await params;
+    const { profile } = await requireAdminOrPengurus();
 
-    // Jika status berubah ke approved/rejected/revision → set reviewed_at otomatis
-    const isReviewed =
-      body.status && ["approved", "rejected", "revision"].includes(body.status);
+    const body = await req.json();
+    const { status, review_notes } = body;
 
-    const updateData: ApprovalUpdate = {
-      ...body,
-      ...(isReviewed && !body.reviewed_at
-        ? { reviewed_at: new Date().toISOString() }
-        : {}),
-    };
+    if (!status || !["approved", "rejected", "revision"].includes(status)) {
+      return errorResponse("Status tidak valid", 400);
+    }
+
+    const supabase = await createSupabaseServerClient();
+
+    // Cek approval ada dan masih pending
+    const { data: existing } = await supabase
+      .from("approvals")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (!existing) return notFoundResponse("Permohonan");
+    if (existing.status !== "pending") {
+      return errorResponse(`Permohonan ini sudah ${existing.status}`, 422);
+    }
 
     const { data, error } = await supabase
       .from("approvals")
-      .update(updateData)
-      .eq("id", params.id)
-      .select()
+      .update({
+        status,
+        reviewed_by: profile.id,
+        review_notes,
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select(
+        `
+        *,
+        requester:users!approvals_requested_by_fkey(id, full_name),
+        reviewer:users!approvals_reviewed_by_fkey(id, full_name)
+      `,
+      )
       .single();
 
-    if (error || !data) return notFound();
+    if (error) return errorResponse(error.message);
 
-    // Jika approved dan category adalah pinjaman → otomatis update status loan
-    if (
-      body.status === "approved" &&
-      data.category === "pinjaman" &&
-      data.reference_id
-    ) {
+    // Jika persetujuan untuk pinjaman, update status pinjaman
+    if (existing.reference_type === "loan") {
+      const loanStatus = status === "approved" ? "approved" : "rejected";
       await supabase
         .from("loans")
-        .update({ status: "approved", updated_at: new Date().toISOString() })
-        .eq("id", data.reference_id);
+        .update({
+          status: loanStatus,
+          approved_by: profile.id,
+          approved_date: new Date().toISOString().split("T")[0],
+          notes: review_notes,
+        })
+        .eq("id", existing.reference_id);
     }
 
-    return ok(data, "Status persetujuan berhasil diupdate");
+    const statusLabel =
+      {
+        approved: "disetujui",
+        rejected: "ditolak",
+        revision: "dikembalikan untuk revisi",
+      }[status] || status;
+
+    return successResponse(data, `Permohonan berhasil ${statusLabel}`);
   } catch (err) {
-    return serverError(err);
-  }
-}
-
-// DELETE /api/approvals/[id]
-export async function DELETE(_req: NextRequest, { params }: Params) {
-  try {
-    const { data: approval } = await supabase
-      .from("approvals")
-      .select("status")
-      .eq("id", params.id)
-      .single();
-
-    if (!approval) return notFound();
-    if (approval.status !== "pending") {
-      return badRequest("Hanya approval berstatus pending yang dapat dihapus");
-    }
-
-    const { error } = await supabase
-      .from("approvals")
-      .delete()
-      .eq("id", params.id);
-    if (error) return serverError(error);
-    return ok(null, "Pengajuan berhasil dihapus");
-  } catch (err) {
-    return serverError(err);
+    return handleApiError(err);
   }
 }

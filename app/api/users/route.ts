@@ -1,59 +1,53 @@
+// app/api/users/route.ts
+
 import { NextRequest } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { createSupabaseServerClient } from "@/lib/supabase";
 import {
-  ok,
-  okList,
-  created,
-  badRequest,
-  serverError,
-} from "@/lib/api-response";
-import type { UserInsert } from "@/lib/types";
+  successResponse,
+  errorResponse,
+  handleApiError,
+  requireAuth,
+  getUserProfile,
+  requireAdminOrPengurus,
+  parsePagination,
+} from "@/lib/api-helpers";
 
 // GET /api/users
-// Query params: role, status, search
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const role = searchParams.get("role");
-    const status = searchParams.get("status");
-    const search = searchParams.get("search");
+    await requireAdminOrPengurus();
 
-    let query = supabase
-      .from("users")
-      .select("*", { count: "exact" })
-      .order("created_at", { ascending: false });
+    const url = new URL(req.url);
+    const { page, pageSize, from, to } = parsePagination(url);
+    const search = url.searchParams.get("search") || "";
+    const role = url.searchParams.get("role");
+    const isActive = url.searchParams.get("isActive");
 
+    const supabase = await createSupabaseServerClient();
+    let query = supabase.from("users").select("*", { count: "exact" });
+
+    if (search) {
+      query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
+    }
     if (role) query = query.eq("role", role);
-    if (status) query = query.eq("status", status);
-    if (search) query = query.ilike("name", `%${search}%`);
-
-    const { data, error, count } = await query;
-
-    if (error) return serverError(error);
-    return okList(data ?? [], count ?? 0);
-  } catch (err) {
-    return serverError(err);
-  }
-}
-
-// POST /api/users
-export async function POST(req: NextRequest) {
-  try {
-    const body: UserInsert = await req.json();
-
-    if (!body.name || !body.email || !body.role) {
-      return badRequest("Field name, email, dan role wajib diisi");
+    if (isActive !== null && isActive !== undefined) {
+      query = query.eq("is_active", isActive === "true");
     }
 
-    const { data, error } = await supabase
-      .from("users")
-      .insert(body)
-      .select()
-      .single();
+    const { data, error, count } = await query
+      .order("created_at", { ascending: false })
+      .range(from, to);
 
-    if (error) return serverError(error);
-    return created(data, "User berhasil dibuat");
+    if (error) return errorResponse(error.message);
+
+    return successResponse({
+      data,
+      total: count ?? 0,
+      page,
+      pageSize,
+      totalPages: Math.ceil((count ?? 0) / pageSize),
+    });
   } catch (err) {
-    return serverError(err);
+    return handleApiError(err);
   }
 }

@@ -1,146 +1,198 @@
+// app/api/savings-transactions/route.ts
+
 import { NextRequest } from "next/server";
-import { supabase } from "@/lib/supabase";
-import { okList, created, badRequest, serverError } from "@/lib/api-response";
-import type { SavingsTransactionInsert } from "@/lib/types";
+import { createSupabaseServerClient } from "@/lib/supabase";
+import {
+  successResponse,
+  errorResponse,
+  handleApiError,
+  requireAuth,
+  getUserProfile,
+  requireAdminOrPengurus,
+  parsePagination,
+} from "@/lib/api-helpers";
 
 // GET /api/savings-transactions
-// Query params: member_id, savings_account_id, transaction_type, status, from, to
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const member_id = searchParams.get("member_id");
-    const savings_account_id = searchParams.get("savings_account_id");
-    const transaction_type = searchParams.get("transaction_type");
-    const status = searchParams.get("status");
-    const from = searchParams.get("from");
-    const to = searchParams.get("to");
+    const authUser = await requireAuth();
+    const profile = await getUserProfile(authUser.id);
 
-    let query = supabase
-      .from("savings_transactions")
-      .select("*, members(member_code, name)", { count: "exact" })
-      .order("transaction_date", { ascending: false });
+    const url = new URL(req.url);
+    const { page, pageSize, from, to } = parsePagination(url);
+    const accountId = url.searchParams.get("accountId");
+    const memberId = url.searchParams.get("memberId");
+    const transactionType = url.searchParams.get("transactionType");
+    const dateFrom = url.searchParams.get("dateFrom");
+    const dateTo = url.searchParams.get("dateTo");
 
-    if (member_id) query = query.eq("member_id", member_id);
-    if (savings_account_id)
-      query = query.eq("savings_account_id", savings_account_id);
-    if (transaction_type)
-      query = query.eq("transaction_type", transaction_type);
-    if (status) query = query.eq("status", status);
-    if (from) query = query.gte("transaction_date", from);
-    if (to) query = query.lte("transaction_date", to);
+    const supabase = await createSupabaseServerClient();
+    let query = supabase.from("savings_transactions").select(
+      `
+        *,
+        savings_account:savings_accounts(
+          id, account_number, account_type
+        ),
+        member:members(id, member_number, full_name)
+      `,
+      { count: "exact" },
+    );
 
-    const { data, error, count } = await query;
-    if (error) return serverError(error);
-    return okList(data ?? [], count ?? 0);
+    // Anggota hanya lihat transaksi miliknya
+    if (profile?.role === "anggota") {
+      const { data: member } = await supabase
+        .from("members")
+        .select("id")
+        .eq("user_id", authUser.id)
+        .single();
+      if (!member)
+        return successResponse({
+          data: [],
+          total: 0,
+          page,
+          pageSize,
+          totalPages: 0,
+        });
+      query = query.eq("member_id", member.id);
+    }
+
+    if (accountId) query = query.eq("savings_account_id", accountId);
+    if (memberId) query = query.eq("member_id", memberId);
+    if (transactionType) query = query.eq("transaction_type", transactionType);
+    if (dateFrom) query = query.gte("transaction_date", dateFrom);
+    if (dateTo) query = query.lte("transaction_date", dateTo);
+
+    const { data, error, count } = await query
+      .order("created_at", { ascending: false })
+      .range(from, to);
+
+    if (error) return errorResponse(error.message);
+
+    return successResponse({
+      data,
+      total: count ?? 0,
+      page,
+      pageSize,
+      totalPages: Math.ceil((count ?? 0) / pageSize),
+    });
   } catch (err) {
-    return serverError(err);
+    return handleApiError(err);
   }
 }
 
-// POST /api/savings-transactions
-// Handles setor & tarik dengan update otomatis ke savings_accounts
+// POST /api/savings-transactions — Setoran atau Penarikan
 export async function POST(req: NextRequest) {
   try {
-    const body: SavingsTransactionInsert = await req.json();
+    const { profile } = await requireAdminOrPengurus();
 
+    const body = await req.json();
     const {
-      member_id,
       savings_account_id,
       transaction_type,
       amount,
-      payment_method,
-      officer,
-      note,
+      description,
       transaction_date,
-      transaction_code,
     } = body;
 
-    if (
-      !member_id ||
-      !savings_account_id ||
-      !transaction_type ||
-      !amount ||
-      !payment_method
-    ) {
-      return badRequest(
-        "Field member_id, savings_account_id, transaction_type, amount, dan payment_method wajib diisi",
-      );
+    if (!savings_account_id)
+      return errorResponse("ID rekening wajib diisi", 400);
+    if (!transaction_type)
+      return errorResponse("Jenis transaksi wajib dipilih", 400);
+    if (!["setoran", "penarikan"].includes(transaction_type)) {
+      return errorResponse("Jenis transaksi tidak valid", 400);
     }
+    if (!amount || amount <= 0)
+      return errorResponse("Jumlah transaksi tidak valid", 400);
 
-    if (amount <= 0) return badRequest("Jumlah transaksi harus lebih dari 0");
+    const supabase = await createSupabaseServerClient();
 
-    // Ambil saldo rekening saat ini
-    const { data: account, error: accErr } = await supabase
+    // Ambil data rekening + lock (pakai select for update via RPC atau supabase transaction)
+    const { data: account } = await supabase
       .from("savings_accounts")
-      .select("balance_pokok, balance_wajib, balance_sukarela, total_balance")
+      .select("*, member:members(id, full_name, member_number)")
       .eq("id", savings_account_id)
       .single();
 
-    if (accErr || !account)
-      return badRequest("Rekening simpanan tidak ditemukan");
+    if (!account) return errorResponse("Rekening tidak ditemukan", 404);
+    if (account.status !== "active")
+      return errorResponse("Rekening tidak aktif", 422);
 
-    // Validasi saldo cukup untuk penarikan
-    if (transaction_type === "tarik" && account.total_balance < amount) {
-      return badRequest(
-        `Saldo tidak mencukupi. Saldo tersedia: Rp ${account.total_balance.toLocaleString("id-ID")}`,
-      );
+    // Cek saldo cukup untuk penarikan
+    if (transaction_type === "penarikan") {
+      if (amount > account.balance) {
+        return errorResponse(
+          `Saldo tidak mencukupi. Saldo saat ini: Rp ${account.balance.toLocaleString("id-ID")}`,
+          422,
+        );
+      }
+      // Simpanan wajib & pokok: saldo minimum Rp 0
+      if (account.account_type !== "sukarela") {
+        return errorResponse(
+          "Simpanan pokok dan wajib tidak dapat ditarik",
+          422,
+        );
+      }
     }
 
-    // Hitung balance_after (menggunakan sukarela sebagai basis utama transaksi)
+    const balanceBefore = account.balance;
     const balanceAfter =
-      transaction_type === "setor"
-        ? account.total_balance + amount
-        : account.total_balance - amount;
+      transaction_type === "setoran"
+        ? balanceBefore + amount
+        : balanceBefore - amount;
+
+    // Generate nomor referensi
+    const refNumber = `TRX-${Date.now()}`;
 
     // Insert transaksi
-    const { data: trx, error: trxErr } = await supabase
+    const { data: transaction, error: txnError } = await supabase
       .from("savings_transactions")
       .insert({
-        transaction_code: transaction_code ?? generateTrxCode("ST"),
-        member_id,
         savings_account_id,
-        transaction_date:
-          transaction_date ?? new Date().toISOString().split("T")[0],
+        member_id: account.member_id,
         transaction_type,
         amount,
+        balance_before: balanceBefore,
         balance_after: balanceAfter,
-        payment_method,
-        status: "success",
-        officer: officer ?? null,
-        note: note ?? null,
+        description:
+          description ||
+          (transaction_type === "setoran" ? "Setoran" : "Penarikan"),
+        reference_number: refNumber,
+        transaction_date:
+          transaction_date || new Date().toISOString().split("T")[0],
+        created_by: profile.id,
       })
       .select()
       .single();
 
-    if (trxErr) return serverError(trxErr);
+    if (txnError) return errorResponse(txnError.message);
 
     // Update saldo rekening
-    const newSukarela =
-      transaction_type === "setor"
-        ? account.balance_sukarela + amount
-        : account.balance_sukarela - amount;
-
-    const { error: updErr } = await supabase
+    const { error: balanceError } = await supabase
       .from("savings_accounts")
-      .update({
-        balance_sukarela: Math.max(0, newSukarela),
-        total_balance: balanceAfter,
-        updated_at: new Date().toISOString(),
-      })
+      .update({ balance: balanceAfter })
       .eq("id", savings_account_id);
 
-    if (updErr)
-      console.error("[Savings balance update] Failed:", updErr.message);
+    if (balanceError) return errorResponse(balanceError.message);
 
-    return created(trx, `Transaksi ${transaction_type} berhasil`);
+    // Catat financial transaction
+    await supabase.from("financial_transactions").insert({
+      transaction_type:
+        transaction_type === "setoran" ? "pemasukan" : "pengeluaran",
+      category: "simpanan",
+      amount,
+      description: `${transaction_type === "setoran" ? "Setoran" : "Penarikan"} simpanan ${account.account_type} - ${(account.member as { full_name: string }).full_name}`,
+      reference_type: "savings_transaction",
+      reference_id: transaction.id,
+      transaction_date: transaction.transaction_date,
+      created_by: profile.id,
+    });
+
+    return successResponse(
+      { ...transaction, balance_after: balanceAfter },
+      `${transaction_type === "setoran" ? "Setoran" : "Penarikan"} berhasil dicatat`,
+      201,
+    );
   } catch (err) {
-    return serverError(err);
+    return handleApiError(err);
   }
-}
-
-function generateTrxCode(prefix: string): string {
-  const now = new Date();
-  const yyyymm = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const rand = Math.floor(Math.random() * 90000) + 10000;
-  return `${prefix}-${yyyymm}-${rand}`;
 }

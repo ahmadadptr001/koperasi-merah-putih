@@ -1,139 +1,224 @@
+// services/savingsService.ts
+import { createSupabaseServerClient } from "@/lib/supabase";
 import type {
   SavingsAccount,
+  SavingsAccountInsert,
   SavingsAccountUpdate,
   SavingsTransaction,
   SavingsTransactionInsert,
+  SavingsAccountType,
   ApiResponse,
   ApiListResponse,
-  SavingsTransactionType,
-  TransactionStatus,
 } from "@/lib/types";
 
-const ACCOUNTS_BASE = "/api/savings-accounts";
-const TRANSACTIONS_BASE = "/api/savings-transactions";
+// ════════════════════════════════════════════════════════
+// SAVINGS ACCOUNTS
+// ════════════════════════════════════════════════════════
 
-// ─── Savings Accounts ────────────────────────
-
-interface GetAccountsParams {
+export async function getSavingsAccounts(params?: {
   member_id?: string;
+  account_type?: SavingsAccountType;
+  status?: SavingsAccount["status"];
+}): Promise<ApiListResponse<SavingsAccount>> {
+  const supabase = await createSupabaseServerClient();
+
+  let query = supabase
+    .from("savings_accounts")
+    .select("*", { count: "exact" })
+    .order("created_at", { ascending: false });
+
+  if (params?.member_id) query = query.eq("member_id", params.member_id);
+  if (params?.account_type)
+    query = query.eq("account_type", params.account_type);
+  if (params?.status) query = query.eq("status", params.status);
+
+  const { data, error, count } = await query;
+
+  if (error) return { data: [], total: 0, error: error.message };
+  return { data: data as SavingsAccount[], total: count ?? 0, error: null };
 }
 
-// ─── Savings Transactions ────────────────────
+export async function getSavingsAccountById(
+  id: string,
+): Promise<ApiResponse<SavingsAccount>> {
+  const supabase = await createSupabaseServerClient();
 
-interface GetTransactionsParams {
-  member_id?: string;
+  const { data, error } = await supabase
+    .from("savings_accounts")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (error) return { data: null, error: error.message };
+  return { data: data as SavingsAccount, error: null };
+}
+
+export async function createSavingsAccount(
+  payload: Omit<SavingsAccountInsert, "account_number">,
+): Promise<ApiResponse<SavingsAccount>> {
+  const supabase = await createSupabaseServerClient();
+
+  // Generate nomor rekening via DB function
+  const { data: accountNumber, error: genError } = await supabase.rpc(
+    "generate_savings_account_number",
+    { p_type: payload.account_type },
+  );
+
+  if (genError) return { data: null, error: genError.message };
+
+  const { data, error } = await supabase
+    .from("savings_accounts")
+    .insert({ ...payload, account_number: accountNumber as string })
+    .select()
+    .single();
+
+  if (error) return { data: null, error: error.message };
+  return {
+    data: data as SavingsAccount,
+    error: null,
+    message: "Rekening simpanan berhasil dibuat",
+  };
+}
+
+export async function updateSavingsAccount(
+  id: string,
+  payload: SavingsAccountUpdate,
+): Promise<ApiResponse<SavingsAccount>> {
+  const supabase = await createSupabaseServerClient();
+
+  const { data, error } = await supabase
+    .from("savings_accounts")
+    .update(payload)
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) return { data: null, error: error.message };
+  return {
+    data: data as SavingsAccount,
+    error: null,
+    message: "Rekening berhasil diperbarui",
+  };
+}
+
+// ════════════════════════════════════════════════════════
+// SAVINGS TRANSACTIONS
+// ════════════════════════════════════════════════════════
+
+export async function getSavingsTransactions(params?: {
   savings_account_id?: string;
-  transaction_type?: SavingsTransactionType;
-  status?: TransactionStatus;
-  from?: string;
-  to?: string;
+  member_id?: string;
+  transaction_type?: SavingsTransaction["transaction_type"];
+  from_date?: string;
+  to_date?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<ApiListResponse<SavingsTransaction>> {
+  const supabase = await createSupabaseServerClient();
+
+  let query = supabase
+    .from("savings_transactions")
+    .select("*", { count: "exact" })
+    .order("transaction_date", { ascending: false });
+
+  if (params?.savings_account_id)
+    query = query.eq("savings_account_id", params.savings_account_id);
+  if (params?.member_id) query = query.eq("member_id", params.member_id);
+  if (params?.transaction_type)
+    query = query.eq("transaction_type", params.transaction_type);
+  if (params?.from_date)
+    query = query.gte("transaction_date", params.from_date);
+  if (params?.to_date) query = query.lte("transaction_date", params.to_date);
+  if (params?.limit) query = query.limit(params.limit);
+  if (params?.offset && params?.limit)
+    query = query.range(params.offset, params.offset + params.limit - 1);
+
+  const { data, error, count } = await query;
+  if (error) return { data: [], total: 0, error: error.message };
+  return { data: data as SavingsTransaction[], total: count ?? 0, error: null };
 }
 
-export interface SetorPayload {
-  member_id: string;
-  savings_account_id: string;
-  transaction_type: "setor";
-  amount: number;
-  payment_method: string;
-  officer?: string;
-  note?: string;
-  transaction_date?: string;
-  transaction_code?: string;
+export async function getSavingsTransactionById(
+  id: string,
+): Promise<ApiResponse<SavingsTransaction>> {
+  const supabase = await createSupabaseServerClient();
+
+  const { data, error } = await supabase
+    .from("savings_transactions")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (error) return { data: null, error: error.message };
+  return { data: data as SavingsTransaction, error: null };
 }
 
-export interface TarikPayload extends Omit<SetorPayload, "transaction_type"> {
-  transaction_type: "tarik";
+/**
+ * Setor / Tarik simpanan.
+ * Mengupdate balance savings_account secara atomik di dalam transaksi DB.
+ */
+export async function createSavingsTransaction(
+  payload: Omit<
+    SavingsTransactionInsert,
+    "balance_before" | "balance_after" | "reference_number"
+  >,
+): Promise<ApiResponse<SavingsTransaction>> {
+  const supabase = await createSupabaseServerClient();
+
+  // 1. Ambil balance sekarang
+  const { data: account, error: accErr } = await supabase
+    .from("savings_accounts")
+    .select("balance, status")
+    .eq("id", payload.savings_account_id)
+    .single();
+
+  if (accErr) return { data: null, error: accErr.message };
+  if (!account) return { data: null, error: "Rekening tidak ditemukan" };
+  if (account.status !== "active")
+    return { data: null, error: "Rekening tidak aktif" };
+
+  const balanceBefore = Number(account.balance);
+
+  // 2. Validasi saldo cukup untuk penarikan
+  if (payload.transaction_type === "penarikan") {
+    if (payload.amount > balanceBefore) {
+      return { data: null, error: "Saldo tidak mencukupi" };
+    }
+  }
+
+  const balanceAfter =
+    payload.transaction_type === "setoran"
+      ? balanceBefore + payload.amount
+      : balanceBefore - payload.amount;
+
+  // 3. Generate reference number
+  const refNumber = `TXN-${Date.now()}`;
+
+  // 4. Insert transaksi
+  const { data: txn, error: txnErr } = await supabase
+    .from("savings_transactions")
+    .insert({
+      ...payload,
+      balance_before: balanceBefore,
+      balance_after: balanceAfter,
+      reference_number: refNumber,
+    })
+    .select()
+    .single();
+
+  if (txnErr) return { data: null, error: txnErr.message };
+
+  // 5. Update balance di savings_account
+  const { error: updateErr } = await supabase
+    .from("savings_accounts")
+    .update({ balance: balanceAfter })
+    .eq("id", payload.savings_account_id);
+
+  if (updateErr) return { data: null, error: updateErr.message };
+
+  return {
+    data: txn as SavingsTransaction,
+    error: null,
+    message: `${payload.transaction_type === "setoran" ? "Setoran" : "Penarikan"} berhasil`,
+  };
 }
-
-export const savingsService = {
-  // ─── Accounts ───
-
-  async getAccounts(
-    params?: GetAccountsParams,
-  ): Promise<ApiListResponse<SavingsAccount>> {
-    const url = new URL(ACCOUNTS_BASE, window.location.origin);
-    if (params?.member_id) url.searchParams.set("member_id", params.member_id);
-    const res = await fetch(url.toString());
-    return res.json();
-  },
-
-  async getAccountById(id: string): Promise<ApiResponse<SavingsAccount>> {
-    const res = await fetch(`${ACCOUNTS_BASE}/${id}`);
-    return res.json();
-  },
-
-  async getAccountByMemberId(
-    memberId: string,
-  ): Promise<ApiResponse<SavingsAccount | null>> {
-    const result = await savingsService.getAccounts({ member_id: memberId });
-    if (result.error) return { data: null, error: result.error };
-    return { data: result.data[0] ?? null, error: null };
-  },
-
-  async updateAccount(
-    id: string,
-    payload: SavingsAccountUpdate,
-  ): Promise<ApiResponse<SavingsAccount>> {
-    const res = await fetch(`${ACCOUNTS_BASE}/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    return res.json();
-  },
-
-  // ─── Transactions ───
-
-  async getTransactions(
-    params?: GetTransactionsParams,
-  ): Promise<ApiListResponse<SavingsTransaction>> {
-    const url = new URL(TRANSACTIONS_BASE, window.location.origin);
-    if (params?.member_id) url.searchParams.set("member_id", params.member_id);
-    if (params?.savings_account_id)
-      url.searchParams.set("savings_account_id", params.savings_account_id);
-    if (params?.transaction_type)
-      url.searchParams.set("transaction_type", params.transaction_type);
-    if (params?.status) url.searchParams.set("status", params.status);
-    if (params?.from) url.searchParams.set("from", params.from);
-    if (params?.to) url.searchParams.set("to", params.to);
-    const res = await fetch(url.toString());
-    return res.json();
-  },
-
-  async getTransactionById(
-    id: string,
-  ): Promise<ApiResponse<SavingsTransaction>> {
-    const res = await fetch(`${TRANSACTIONS_BASE}/${id}`);
-    return res.json();
-  },
-
-  async setor(payload: SetorPayload): Promise<ApiResponse<SavingsTransaction>> {
-    const res = await fetch(TRANSACTIONS_BASE, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...payload, transaction_type: "setor" }),
-    });
-    return res.json();
-  },
-
-  async tarik(payload: TarikPayload): Promise<ApiResponse<SavingsTransaction>> {
-    const res = await fetch(TRANSACTIONS_BASE, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...payload, transaction_type: "tarik" }),
-    });
-    return res.json();
-  },
-
-  async updateTransaction(
-    id: string,
-    payload: { note?: string; officer?: string; status?: TransactionStatus },
-  ): Promise<ApiResponse<SavingsTransaction>> {
-    const res = await fetch(`${TRANSACTIONS_BASE}/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    return res.json();
-  },
-};

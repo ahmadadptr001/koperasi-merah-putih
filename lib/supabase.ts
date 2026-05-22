@@ -4,21 +4,17 @@
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import type { Database } from "./supabase-types";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 // Client untuk browser (komponen client-side)
-export const supabaseBrowser = createClient<Database>(
-  supabaseUrl,
-  supabaseAnonKey,
-);
+export const supabaseBrowser = createClient(supabaseUrl, supabaseAnonKey);
 
 // Client untuk server (API routes, Server Components)
 export async function createSupabaseServerClient() {
   const cookieStore = await cookies();
-  return createServerClient<Database>(supabaseUrl, supabaseAnonKey, {
+  return createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
       getAll() {
         return cookieStore.getAll();
@@ -37,7 +33,7 @@ export async function createSupabaseServerClient() {
 }
 
 // Client admin (hanya untuk operasi server-side sensitif)
-export const supabaseAdmin = createClient<Database>(
+export const supabaseAdmin = createClient(
   supabaseUrl,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
   { auth: { autoRefreshToken: false, persistSession: false } },

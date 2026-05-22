@@ -1,53 +1,50 @@
 // app/api/users/route.ts
-
 import { NextRequest } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase";
-import {
-  successResponse,
-  errorResponse,
-  handleApiError,
-  requireAuth,
-  getUserProfile,
-  requireAdminOrPengurus,
-  parsePagination,
-} from "@/lib/api-helpers";
+import { getUsers, createUser } from "@/services/userService";
+import { okList, created, badRequest, serverError } from "@/lib/api-response";
+import type { UserRole } from "@/lib/types";
 
-// GET /api/users
 export async function GET(req: NextRequest) {
   try {
-    await requireAdminOrPengurus();
-
-    const url = new URL(req.url);
-    const { page, pageSize, from, to } = parsePagination(url);
-    const search = url.searchParams.get("search") || "";
-    const role = url.searchParams.get("role");
-    const isActive = url.searchParams.get("isActive");
-
-    const supabase = await createSupabaseServerClient();
-    let query = supabase.from("users").select("*", { count: "exact" });
-
-    if (search) {
-      query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
-    }
-    if (role) query = query.eq("role", role);
-    if (isActive !== null && isActive !== undefined) {
-      query = query.eq("is_active", isActive === "true");
-    }
-
-    const { data, error, count } = await query
-      .order("created_at", { ascending: false })
-      .range(from, to);
-
-    if (error) return errorResponse(error.message);
-
-    return successResponse({
-      data,
-      total: count ?? 0,
-      page,
-      pageSize,
-      totalPages: Math.ceil((count ?? 0) / pageSize),
+    const { searchParams } = req.nextUrl;
+    const result = await getUsers({
+      role: (searchParams.get("role") as UserRole) || undefined,
+      is_active: searchParams.has("is_active")
+        ? searchParams.get("is_active") === "true"
+        : undefined,
+      search: searchParams.get("search") || undefined,
     });
-  } catch (err) {
-    return handleApiError(err);
+    if (result.error) return serverError(result.error);
+    return okList(result.data, result.total);
+  } catch (e) {
+    return serverError(e);
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    if (!body.email) return badRequest("email wajib diisi");
+    if (!body.full_name) return badRequest("full_name wajib diisi");
+
+    const validRoles: UserRole[] = ["admin", "pengurus", "anggota"];
+    if (body.role && !validRoles.includes(body.role)) {
+      return badRequest(`role harus salah satu dari: ${validRoles.join(", ")}`);
+    }
+
+    const result = await createUser({
+      id: body.id, // UUID dari auth.users harus sudah ada
+      email: body.email,
+      full_name: body.full_name,
+      phone: body.phone ?? null,
+      role: body.role ?? "anggota",
+      avatar_url: body.avatar_url ?? null,
+      is_active: body.is_active ?? true,
+    });
+
+    if (result.error) return serverError(result.error);
+    return created(result.data, result.message);
+  } catch (e) {
+    return serverError(e);
   }
 }

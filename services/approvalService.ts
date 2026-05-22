@@ -1,155 +1,134 @@
+// services/approvalService.ts
+import { createSupabaseServerClient } from "@/lib/supabase";
 import type {
   Approval,
   ApprovalInsert,
   ApprovalUpdate,
   ApiResponse,
   ApiListResponse,
-  ApprovalCategory,
-  ApprovalStatus,
-  ApprovalPriority,
-  DocumentStatus,
 } from "@/lib/types";
 
-const BASE = "/api/approvals";
+export async function getApprovals(params?: {
+  status?: Approval["status"];
+  reference_type?: Approval["reference_type"];
+  requested_by?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<ApiListResponse<Approval>> {
+  const supabase = await createSupabaseServerClient();
 
-interface GetApprovalsParams {
-  member_id?: string;
-  category?: ApprovalCategory;
-  status?: ApprovalStatus;
-  priority?: ApprovalPriority;
-  reviewed_by?: string;
-  from?: string;
-  to?: string;
+  let query = supabase
+    .from("approvals")
+    .select("*", { count: "exact" })
+    .order("created_at", { ascending: false });
+
+  if (params?.status) query = query.eq("status", params.status);
+  if (params?.reference_type)
+    query = query.eq("reference_type", params.reference_type);
+  if (params?.requested_by)
+    query = query.eq("requested_by", params.requested_by);
+  if (params?.limit) query = query.limit(params.limit);
+  if (params?.offset && params?.limit)
+    query = query.range(params.offset, params.offset + params.limit - 1);
+
+  const { data, error, count } = await query;
+  if (error) return { data: [], total: 0, error: error.message };
+  return { data: data as Approval[], total: count ?? 0, error: null };
 }
 
-export interface ReviewPayload {
-  status: ApprovalStatus;
-  reviewed_by: string;
-  reviewed_at?: string;
+export async function getApprovalById(
+  id: string,
+): Promise<ApiResponse<Approval>> {
+  const supabase = await createSupabaseServerClient();
+
+  const { data, error } = await supabase
+    .from("approvals")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (error) return { data: null, error: error.message };
+  return { data: data as Approval, error: null };
 }
 
-export interface UpdateDocumentPayload {
-  document_status: DocumentStatus;
+export async function createApproval(
+  payload: ApprovalInsert,
+): Promise<ApiResponse<Approval>> {
+  const supabase = await createSupabaseServerClient();
+
+  const { data, error } = await supabase
+    .from("approvals")
+    .insert(payload)
+    .select()
+    .single();
+
+  if (error) return { data: null, error: error.message };
+  return {
+    data: data as Approval,
+    error: null,
+    message: "Permohonan berhasil diajukan",
+  };
 }
 
-export const approvalService = {
-  // GET /api/approvals
-  async getAll(
-    params?: GetApprovalsParams,
-  ): Promise<ApiListResponse<Approval>> {
-    const url = new URL(BASE, window.location.origin);
-    if (params?.member_id) url.searchParams.set("member_id", params.member_id);
-    if (params?.category) url.searchParams.set("category", params.category);
-    if (params?.status) url.searchParams.set("status", params.status);
-    if (params?.priority) url.searchParams.set("priority", params.priority);
-    if (params?.reviewed_by)
-      url.searchParams.set("reviewed_by", params.reviewed_by);
-    if (params?.from) url.searchParams.set("from", params.from);
-    if (params?.to) url.searchParams.set("to", params.to);
+/**
+ * Review approval: approve / reject / minta revisi.
+ * Otomatis set reviewed_by, reviewed_at, review_notes, dan status.
+ */
+export async function reviewApproval(
+  id: string,
+  reviewedBy: string,
+  status: Exclude<Approval["status"], "pending">,
+  reviewNotes?: string,
+): Promise<ApiResponse<Approval>> {
+  const supabase = await createSupabaseServerClient();
 
-    const res = await fetch(url.toString());
-    return res.json();
-  },
+  const payload: ApprovalUpdate = {
+    status,
+    reviewed_by: reviewedBy,
+    reviewed_at: new Date().toISOString(),
+    review_notes: reviewNotes ?? null,
+  };
 
-  // GET /api/approvals/[id]
-  async getById(id: string): Promise<ApiResponse<Approval>> {
-    const res = await fetch(`${BASE}/${id}`);
-    return res.json();
-  },
+  const { data, error } = await supabase
+    .from("approvals")
+    .update(payload)
+    .eq("id", id)
+    .select()
+    .single();
 
-  // POST /api/approvals
-  async create(payload: ApprovalInsert): Promise<ApiResponse<Approval>> {
-    const res = await fetch(BASE, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    return res.json();
-  },
+  if (error) return { data: null, error: error.message };
 
-  // PUT /api/approvals/[id]
-  async update(
-    id: string,
-    payload: ApprovalUpdate,
-  ): Promise<ApiResponse<Approval>> {
-    const res = await fetch(`${BASE}/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    return res.json();
-  },
+  const label =
+    status === "approved"
+      ? "disetujui"
+      : status === "rejected"
+        ? "ditolak"
+        : "diminta revisi";
 
-  // DELETE /api/approvals/[id]
-  async remove(id: string): Promise<ApiResponse<null>> {
-    const res = await fetch(`${BASE}/${id}`, { method: "DELETE" });
-    return res.json();
-  },
+  return {
+    data: data as Approval,
+    error: null,
+    message: `Permohonan ${label}`,
+  };
+}
 
-  // Shorthand: review sebuah approval (approve / reject / revision)
-  async review(
-    id: string,
-    payload: ReviewPayload,
-  ): Promise<ApiResponse<Approval>> {
-    return approvalService.update(id, {
-      status: payload.status,
-      reviewed_by: payload.reviewed_by,
-      reviewed_at: payload.reviewed_at ?? new Date().toISOString(),
-    });
-  },
+export async function updateApproval(
+  id: string,
+  payload: ApprovalUpdate,
+): Promise<ApiResponse<Approval>> {
+  const supabase = await createSupabaseServerClient();
 
-  // Shorthand: update hanya status dokumen
-  async updateDocumentStatus(
-    id: string,
-    payload: UpdateDocumentPayload,
-  ): Promise<ApiResponse<Approval>> {
-    return approvalService.update(id, {
-      document_status: payload.document_status,
-    });
-  },
+  const { data, error } = await supabase
+    .from("approvals")
+    .update(payload)
+    .eq("id", id)
+    .select()
+    .single();
 
-  // Shorthand: approve
-  async approve(
-    id: string,
-    reviewedBy: string,
-  ): Promise<ApiResponse<Approval>> {
-    return approvalService.review(id, {
-      status: "approved",
-      reviewed_by: reviewedBy,
-    });
-  },
-
-  // Shorthand: reject
-  async reject(id: string, reviewedBy: string): Promise<ApiResponse<Approval>> {
-    return approvalService.review(id, {
-      status: "rejected",
-      reviewed_by: reviewedBy,
-    });
-  },
-
-  // Shorthand: minta revisi
-  async requestRevision(
-    id: string,
-    reviewedBy: string,
-  ): Promise<ApiResponse<Approval>> {
-    return approvalService.review(id, {
-      status: "revision",
-      reviewed_by: reviewedBy,
-    });
-  },
-
-  // Helper: filter hanya yang pending (untuk dashboard notifikasi pengurus)
-  async getPending(
-    params?: Omit<GetApprovalsParams, "status">,
-  ): Promise<ApiListResponse<Approval>> {
-    return approvalService.getAll({ ...params, status: "pending" });
-  },
-
-  // Helper: filter berdasarkan reviewer (untuk riwayat review pengurus)
-  async getReviewedBy(
-    userId: string,
-    params?: Omit<GetApprovalsParams, "reviewed_by">,
-  ): Promise<ApiListResponse<Approval>> {
-    return approvalService.getAll({ ...params, reviewed_by: userId });
-  },
-};
+  if (error) return { data: null, error: error.message };
+  return {
+    data: data as Approval,
+    error: null,
+    message: "Persetujuan berhasil diperbarui",
+  };
+}

@@ -1,38 +1,91 @@
+// app/api/financial-transactions/route.ts
+import { NextRequest } from "next/server";
+import {
+  getFinancialTransactions,
+  createFinancialTransaction,
+  getLaporanRingkasan,
+} from "@/services/financialService";
+import {
+  ok,
+  okList,
+  created,
+  badRequest,
+  serverError,
+} from "@/lib/api-response";
+import type { FinancialTransactionType } from "@/lib/types";
+
 export async function GET(req: NextRequest) {
   try {
-    await requireAdminOrPengurus();
+    const { searchParams } = req.nextUrl;
 
-    const url = new URL(req.url);
-    const { page, pageSize, from, to } = parsePagination(url);
-    const txType = url.searchParams.get("type");
-    const category = url.searchParams.get("category");
-    const dateFrom = url.searchParams.get("dateFrom");
-    const dateTo = url.searchParams.get("dateTo");
+    // Mode ringkasan/laporan
+    if (searchParams.get("mode") === "ringkasan") {
+      const from_date = searchParams.get("from_date");
+      const to_date = searchParams.get("to_date");
+      if (!from_date || !to_date)
+        return badRequest("from_date dan to_date wajib untuk mode ringkasan");
 
-    const supabase = await createSupabaseServerClient();
-    let query = supabase
-      .from("financial_transactions")
-      .select("*", { count: "exact" });
+      const result = await getLaporanRingkasan(from_date, to_date);
+      if (result.error) return serverError(result.error);
+      return ok(result.data);
+    }
 
-    if (txType) query = query.eq("transaction_type", txType);
-    if (category) query = query.eq("category", category);
-    if (dateFrom) query = query.gte("transaction_date", dateFrom);
-    if (dateTo) query = query.lte("transaction_date", dateTo);
-
-    const { data, error, count } = await query
-      .order("transaction_date", { ascending: false })
-      .range(from, to);
-
-    if (error) return errorResponse(error.message);
-
-    return successResponse({
-      data,
-      total: count ?? 0,
-      page,
-      pageSize,
-      totalPages: Math.ceil((count ?? 0) / pageSize),
+    // Mode list biasa
+    const result = await getFinancialTransactions({
+      transaction_type:
+        (searchParams.get("transaction_type") as FinancialTransactionType) ||
+        undefined,
+      category: searchParams.get("category") || undefined,
+      from_date: searchParams.get("from_date") || undefined,
+      to_date: searchParams.get("to_date") || undefined,
+      limit: searchParams.get("limit")
+        ? Number(searchParams.get("limit"))
+        : undefined,
+      offset: searchParams.get("offset")
+        ? Number(searchParams.get("offset"))
+        : undefined,
     });
-  } catch (err) {
-    return handleApiError(err);
+    if (result.error) return serverError(result.error);
+    return okList(result.data, result.total);
+  } catch (e) {
+    return serverError(e);
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+
+    if (!body.transaction_type)
+      return badRequest("transaction_type wajib diisi");
+    if (!body.category) return badRequest("category wajib diisi");
+    if (!body.amount || Number(body.amount) <= 0)
+      return badRequest("amount harus lebih dari 0");
+
+    const validTypes: FinancialTransactionType[] = [
+      "pemasukan",
+      "pengeluaran",
+      "transfer",
+    ];
+    if (!validTypes.includes(body.transaction_type)) {
+      return badRequest(`transaction_type harus: ${validTypes.join(", ")}`);
+    }
+
+    const result = await createFinancialTransaction({
+      transaction_type: body.transaction_type as FinancialTransactionType,
+      category: body.category,
+      amount: Number(body.amount),
+      description: body.description ?? null,
+      reference_type: body.reference_type ?? null,
+      reference_id: body.reference_id ?? null,
+      transaction_date:
+        body.transaction_date ?? new Date().toISOString().slice(0, 10),
+      created_by: body.created_by ?? null,
+    });
+
+    if (result.error) return serverError(result.error);
+    return created(result.data, result.message);
+  } catch (e) {
+    return serverError(e);
   }
 }

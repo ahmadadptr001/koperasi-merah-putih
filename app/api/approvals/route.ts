@@ -1,79 +1,66 @@
 // app/api/approvals/route.ts
-
 import { NextRequest } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase";
-import {
-  successResponse,
-  errorResponse,
-  handleApiError,
-  requireAuth,
-  getUserProfile,
-  requireAdminOrPengurus,
-  parsePagination,
-} from "@/lib/api-helpers";
+import { getApprovals, createApproval } from "@/services/approvalService";
+import { okList, created, badRequest, serverError } from "@/lib/api-response";
+import type { ApprovalStatus, ApprovalReferenceType } from "@/lib/types";
 
-// GET /api/approvals
 export async function GET(req: NextRequest) {
   try {
-    const authUser = await requireAuth();
-    const profile = await getUserProfile(authUser.id);
-
-    const url = new URL(req.url);
-    const { page, pageSize, from, to } = parsePagination(url);
-    const status = url.searchParams.get("status");
-    const referenceType = url.searchParams.get("referenceType");
-
-    const supabase = await createSupabaseServerClient();
-    let query = supabase.from("approvals").select(
-      `
-        *,
-        requester:users!approvals_requested_by_fkey(id, full_name, email),
-        reviewer:users!approvals_reviewed_by_fkey(id, full_name)
-      `,
-      { count: "exact" },
-    );
-
-    // Anggota hanya lihat pengajuan miliknya
-    if (profile?.role === "anggota") {
-      query = query.eq("requested_by", authUser.id);
-    }
-
-    if (status) query = query.eq("status", status);
-    if (referenceType) query = query.eq("reference_type", referenceType);
-
-    const { data, error, count } = await query
-      .order("created_at", { ascending: false })
-      .range(from, to);
-
-    if (error) return errorResponse(error.message);
-
-    return successResponse({
-      data,
-      total: count ?? 0,
-      page,
-      pageSize,
-      totalPages: Math.ceil((count ?? 0) / pageSize),
+    const { searchParams } = req.nextUrl;
+    const result = await getApprovals({
+      status: (searchParams.get("status") as ApprovalStatus) || undefined,
+      reference_type:
+        (searchParams.get("reference_type") as ApprovalReferenceType) ||
+        undefined,
+      requested_by: searchParams.get("requested_by") || undefined,
+      limit: searchParams.get("limit")
+        ? Number(searchParams.get("limit"))
+        : undefined,
+      offset: searchParams.get("offset")
+        ? Number(searchParams.get("offset"))
+        : undefined,
     });
-  } catch (err) {
-    return handleApiError(err);
+    if (result.error) return serverError(result.error);
+    return okList(result.data, result.total);
+  } catch (e) {
+    return serverError(e);
   }
 }
 
-// app/api/approvals/[id]/route.ts content (also usable standalone)
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
 
-// GET /api/approvals/[id]
-export async function getApprovalById(id: string, authUserId: string) {
-  const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("approvals")
-    .select(
-      `
-      *,
-      requester:users!approvals_requested_by_fkey(id, full_name, email, role),
-      reviewer:users!approvals_reviewed_by_fkey(id, full_name)
-    `,
-    )
-    .eq("id", id)
-    .single();
-  return { data, error };
+    if (!body.reference_type) return badRequest("reference_type wajib diisi");
+    if (!body.reference_id) return badRequest("reference_id wajib diisi");
+    if (!body.title) return badRequest("title wajib diisi");
+    if (!body.requested_by) return badRequest("requested_by wajib diisi");
+
+    const validRefTypes: ApprovalReferenceType[] = [
+      "loan",
+      "savings_withdrawal",
+      "member_registration",
+      "member_update",
+    ];
+    if (!validRefTypes.includes(body.reference_type)) {
+      return badRequest(`reference_type tidak valid`);
+    }
+
+    const result = await createApproval({
+      reference_type: body.reference_type as ApprovalReferenceType,
+      reference_id: body.reference_id,
+      title: body.title,
+      description: body.description ?? null,
+      status: "pending",
+      requested_by: body.requested_by,
+      reviewed_by: null,
+      review_notes: null,
+      reviewed_at: null,
+    });
+
+    if (result.error) return serverError(result.error);
+    return created(result.data, result.message);
+  } catch (e) {
+    return serverError(e);
+  }
 }

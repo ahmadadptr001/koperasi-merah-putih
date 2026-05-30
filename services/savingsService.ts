@@ -1,5 +1,6 @@
 // services/savingsService.ts
-import { createSupabaseServerClient } from "@/lib/supabase";
+import { createFinancialTransaction } from "./financialService";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type {
   SavingsAccount,
   SavingsAccountInsert,
@@ -165,10 +166,10 @@ export async function createSavingsTransaction(
 ): Promise<ApiResponse<SavingsTransaction>> {
   const supabase = await createSupabaseServerClient();
 
-  // 1. Ambil balance sekarang
+  // 1. Ambil balance sekarang dan account_type
   const { data: account, error: accErr } = await supabase
     .from("savings_accounts")
-    .select("balance, status")
+    .select("balance, status, account_type")
     .eq("id", payload.savings_account_id)
     .single();
 
@@ -176,6 +177,16 @@ export async function createSavingsTransaction(
   if (!account) return { data: null, error: "Rekening tidak ditemukan" };
   if (account.status !== "active")
     return { data: null, error: "Rekening tidak aktif" };
+
+  // ── Validasi penarikan hanya untuk sukarela ──────────────────────────────
+  if (payload.transaction_type === "penarikan") {
+    if (account.account_type !== "sukarela") {
+      return {
+        data: null,
+        error: "Penarikan hanya diperbolehkan untuk Simpanan Sukarela",
+      };
+    }
+  }
 
   const balanceBefore = Number(account.balance);
 
@@ -216,9 +227,56 @@ export async function createSavingsTransaction(
 
   if (updateErr) return { data: null, error: updateErr.message };
 
+  // ─── TAMBAHAN: Catat ke financial_transactions ──────────────────────────
+  await createFinancialTransaction({
+    transaction_type:
+      payload.transaction_type === "setoran" ? "pemasukan" : "pengeluaran",
+    category:
+      payload.transaction_type === "setoran"
+        ? "simpanan"
+        : "penarikan_simpanan",
+    amount: payload.amount,
+    description:
+      payload.description ??
+      `${payload.transaction_type === "setoran" ? "Setoran" : "Penarikan"} simpanan`,
+    reference_type: "savings_transaction",
+    reference_id: txn.id,
+    transaction_date:
+      payload.transaction_date ?? new Date().toISOString().slice(0, 10),
+    created_by: payload.created_by ?? null,
+  });
+
   return {
     data: txn as SavingsTransaction,
     error: null,
     message: `${payload.transaction_type === "setoran" ? "Setoran" : "Penarikan"} berhasil`,
+  };
+}
+
+export async function deleteSavingsAccount(
+  id: string,
+): Promise<ApiResponse<null>> {
+  const supabase = await createSupabaseServerClient();
+
+  // 1. Hapus semua transaksi terkait (untuk menjaga integritas data)
+  const { error: txnErr } = await supabase
+    .from("savings_transactions")
+    .delete()
+    .eq("savings_account_id", id);
+
+  if (txnErr) return { data: null, error: txnErr.message };
+
+  // 2. Hapus rekening (saldo akan ikut terhapus karena tidak ada validasi)
+  const { error } = await supabase
+    .from("savings_accounts")
+    .delete()
+    .eq("id", id);
+
+  if (error) return { data: null, error: error.message };
+
+  return {
+    data: null,
+    error: null,
+    message: "Rekening berhasil dihapus",
   };
 }

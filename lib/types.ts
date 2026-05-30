@@ -7,7 +7,11 @@
 // ENUMS  (sesuai CHECK constraints di schema.sql)
 // ─────────────────────────────────────────────
 
-/** public.users.role */
+/**
+ * public.users.role
+ * CHECK (role IN ('admin', 'pengurus', 'anggota'))
+ * TIDAK ADA 'bendahara' atau 'superadmin' di schema DB
+ */
 export type UserRole = "admin" | "pengurus" | "anggota";
 
 /** public.members.status */
@@ -56,35 +60,36 @@ export type FinancialTransactionType = "pemasukan" | "pengeluaran" | "transfer";
 
 /** public.users */
 export interface User {
-  id: string; // UUID, FK → auth.users
+  id: string;
   email: string;
   full_name: string;
   phone: string | null;
   role: UserRole;
   avatar_url: string | null;
   is_active: boolean;
-  created_at: string; // TIMESTAMPTZ → string ISO
+  created_at: string;
   updated_at: string;
 }
 
 /** public.members */
 export interface Member {
   id: string;
-  user_id: string | null; // FK → public.users
-  member_number: string; // e.g. "KMP-2025-0001"
+  user_id: string | null;
+  member_number: string;
   full_name: string;
   nik: string | null;
-  birth_date: string | null; // DATE → string "YYYY-MM-DD"
+  birth_date: string | null;
   gender: MemberGender | null;
   address: string | null;
   phone: string | null;
   email: string | null;
   occupation: string | null;
-  join_date: string; // DATE → string "YYYY-MM-DD"
+  join_date: string;
   status: MemberStatus;
   photo_url: string | null;
   notes: string | null;
-  created_by: string | null; // FK → public.users
+  area: string | null;
+  created_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -92,12 +97,12 @@ export interface Member {
 /** public.savings_accounts */
 export interface SavingsAccount {
   id: string;
-  member_id: string; // FK → public.members
-  account_number: string; // e.g. "SPK-000001"
+  member_id: string;
+  account_number: string;
   account_type: SavingsAccountType;
-  balance: number; // NUMERIC(15,2)
+  balance: number;
   status: SavingsAccountStatus;
-  opened_date: string; // DATE → string
+  opened_date: string;
   closed_date: string | null;
   notes: string | null;
   created_at: string;
@@ -107,40 +112,41 @@ export interface SavingsAccount {
 /** public.savings_transactions */
 export interface SavingsTransaction {
   id: string;
-  savings_account_id: string; // FK → public.savings_accounts
-  member_id: string; // FK → public.members
+  savings_account_id: string;
+  member_id: string;
   transaction_type: SavingsTransactionType;
-  amount: number; // NUMERIC(15,2)
+  amount: number;
   balance_before: number;
   balance_after: number;
   description: string | null;
   reference_number: string | null;
-  transaction_date: string; // DATE → string
-  created_by: string | null; // FK → public.users
+  transaction_date: string;
+  created_by: string | null;
   created_at: string;
 }
 
 /** public.loans */
 export interface Loan {
   id: string;
-  member_id: string; // FK → public.members
-  loan_number: string; // e.g. "PJM-2025-0001"
-  amount: number; // Pokok pinjaman
-  interest_rate: number; // % per bulan
+  member_id: string;
+  loan_number: string;
+  amount: number;
+  interest_rate: number;
   term_months: number;
   monthly_payment: number;
   total_interest: number;
   total_payment: number;
   paid_amount: number;
-  remaining_amount: number; // GENERATED ALWAYS AS (total_payment - paid_amount)
+  remaining_amount: number;
   purpose: string | null;
   collateral: string | null;
   status: LoanStatus;
-  applied_date: string; // DATE → string
+  applied_date: string;
   approved_date: string | null;
   disbursement_date: string | null;
   due_date: string | null;
-  approved_by: string | null; // FK → public.users
+  approved_by: string | null;
+  requested_by: string | null; // ← baru
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -149,19 +155,19 @@ export interface Loan {
 /** public.loan_payments */
 export interface LoanPayment {
   id: string;
-  loan_id: string; // FK → public.loans
-  installment_no: number; // Angsuran ke-N
-  due_date: string; // DATE → string
+  loan_id: string;
+  installment_no: number;
+  due_date: string;
   payment_date: string | null;
-  principal: number; // Pokok angsuran
-  interest: number; // Bunga angsuran
-  penalty: number; // Denda (default 0)
+  principal: number;
+  interest: number;
+  penalty: number;
   total_amount: number;
   paid_amount: number | null;
   status: LoanPaymentStatus;
   reference_number: string | null;
   notes: string | null;
-  created_by: string | null; // FK → public.users
+  created_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -170,12 +176,13 @@ export interface LoanPayment {
 export interface Approval {
   id: string;
   reference_type: ApprovalReferenceType;
-  reference_id: string; // UUID referensi ke tabel lain
+  reference_id: string;
   title: string;
   description: string | null;
+  amount: number | null; // ← baru
   status: ApprovalStatus;
-  requested_by: string; // FK → public.users
-  reviewed_by: string | null; // FK → public.users
+  requested_by: string;
+  reviewed_by: string | null;
   review_notes: string | null;
   reviewed_at: string | null;
   created_at: string;
@@ -186,20 +193,20 @@ export interface Approval {
 export interface FinancialTransaction {
   id: string;
   transaction_type: FinancialTransactionType;
-  category: string; // 'simpanan' | 'pinjaman' | 'operasional' | 'bunga' dll
+  category: string;
   amount: number;
   description: string | null;
   reference_type: string | null;
   reference_id: string | null;
-  transaction_date: string; // DATE → string
-  created_by: string | null; // FK → public.users
+  transaction_date: string;
+  created_by: string | null;
   created_at: string;
 }
 
 /** public.notification_prefs */
 export interface NotificationPref {
   id: string;
-  user_id: string; // FK → public.users (UNIQUE)
+  user_id: string;
   email_notifications: boolean;
   sms_notifications: boolean;
   loan_due_reminder: boolean;
@@ -208,12 +215,13 @@ export interface NotificationPref {
   loan_approval_update: boolean;
   monthly_report: boolean;
   reminder_days_before: number;
+  push_notifications: boolean;
   created_at: string;
   updated_at: string;
 }
 
 // ─────────────────────────────────────────────
-// INSERT PAYLOADS  (kolom auto-generate dibuang)
+// INSERT PAYLOADS
 // ─────────────────────────────────────────────
 
 export type UserInsert = Omit<User, "id" | "created_at" | "updated_at">;
@@ -228,17 +236,18 @@ export type SavingsAccountInsert = Omit<
 >;
 export type SavingsAccountUpdate = Partial<SavingsAccountInsert>;
 
-/** remaining_amount adalah GENERATED ALWAYS — tidak boleh di-insert/update */
 export type SavingsTransactionInsert = Omit<
   SavingsTransaction,
   "id" | "created_at"
 >;
 export type SavingsTransactionUpdate = Partial<SavingsTransactionInsert>;
 
+/** remaining_amount adalah GENERATED ALWAYS — tidak boleh di-insert/update */
 export type LoanInsert = Omit<
   Loan,
   "id" | "remaining_amount" | "created_at" | "updated_at"
 >;
+
 export type LoanUpdate = Partial<LoanInsert>;
 
 export type LoanPaymentInsert = Omit<
@@ -279,8 +288,19 @@ export interface ApiListResponse<T> {
 }
 
 // ─────────────────────────────────────────────
-// DATABASE TYPE MAP  (untuk createClient<Database>)
-// Nama tabel harus sama persis dengan schema.sql
+// LOAN SCHEDULE (return type dari DB function)
+// ─────────────────────────────────────────────
+
+export interface LoanScheduleItem {
+  installment_no: number;
+  due_date: string;
+  principal: number;
+  interest: number;
+  total_amount: number;
+}
+
+// ─────────────────────────────────────────────
+// DATABASE TYPE MAP
 // ─────────────────────────────────────────────
 
 export interface Database {
@@ -365,13 +385,7 @@ export interface Database {
       };
       calculate_loan_schedule: {
         Args: { p_loan_id: string };
-        Returns: {
-          installment_no: number;
-          due_date: string;
-          principal: number;
-          interest: number;
-          total_amount: number;
-        }[];
+        Returns: LoanScheduleItem[];
       };
     };
   };

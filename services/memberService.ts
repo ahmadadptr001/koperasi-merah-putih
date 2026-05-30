@@ -1,5 +1,5 @@
 // services/memberService.ts
-import { createSupabaseServerClient } from "@/lib/supabase";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type {
   Member,
   MemberInsert,
@@ -28,8 +28,10 @@ export async function getMembers(params?: {
   }
 
   if (params?.search) {
+    // NOTE: Setelah menjalankan migration add_area_to_members.sql,
+    // kolom `area` sudah tersedia untuk pencarian.
     query = query.or(
-      `full_name.ilike.%${params.search}%,member_number.ilike.%${params.search}%,nik.ilike.%${params.search}%,phone.ilike.%${params.search}%`,
+      `full_name.ilike.%${params.search}%,member_number.ilike.%${params.search}%,nik.ilike.%${params.search}%,phone.ilike.%${params.search}%,area.ilike.%${params.search}%`,
     );
   }
 
@@ -75,7 +77,6 @@ export async function createMember(
 ): Promise<ApiResponse<Member>> {
   const supabase = await createSupabaseServerClient();
 
-  // Generate nomor anggota via DB function
   const { data: memberNumber, error: genError } = await supabase.rpc(
     "generate_member_number",
   );

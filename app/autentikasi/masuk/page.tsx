@@ -1,27 +1,20 @@
 "use client";
 
+// app/autentikasi/masuk/page.tsx
+
 import React, { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import {
-  Eye,
-  EyeOff,
-  Building,
-  LogIn,
-  ArrowRight,
-  Network, // Mewakili Google
-} from "lucide-react";
-// Pastikan path ini sesuai dengan project kamu
+import { Eye, EyeOff, Building, LogIn } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useColors } from "@/hooks/useColors";
+import { supabaseBrowser } from "@/lib/supabase/client";
 import Swal from "sweetalert2";
 
-// --- SCHEMA VALIDASI LOGIN ---
 const loginSchema = z.object({
-  identifier: z
-    .string()
-    .min(3, { message: "Email atau Username minimal 3 karakter" }),
+  email: z.string().email({ message: "Format email tidak valid" }),
   password: z.string().min(1, { message: "Kata sandi wajib diisi" }),
   rememberMe: z.boolean().optional(),
 });
@@ -30,6 +23,7 @@ type LoginValues = z.infer<typeof loginSchema>;
 
 export default function Masuk() {
   const colors = useColors();
+  const router = useRouter();
   const [showPass, setShowPass] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -39,32 +33,81 @@ export default function Masuk() {
     formState: { errors },
   } = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
-    defaultValues: {
-      identifier: "",
-      password: "",
-      rememberMe: false,
-    },
+    defaultValues: { email: "", password: "", rememberMe: false },
   });
 
   const onLogin = async (data: LoginValues) => {
     setIsLoading(true);
-    console.log("Proses Login:", data);
+    try {
+      // 1. Login ke Supabase Auth
+      const { error, data: authData } =
+        await supabaseBrowser.auth.signInWithPassword({
+          email: data.email,
+          password: data.password,
+        });
 
-    // Simulasi delay API
-    setTimeout(() => {
-      setIsLoading(false);
-      Swal.fire({
-        title: "Selamat Datang Kembali!",
-        text: "Anda berhasil masuk ke sistem.",
-        icon: "success",
-        confirmButtonText: "OK",
+      if (error) {
+        await Swal.fire({
+          title: "Login Gagal",
+          text:
+            error.message === "Invalid login credentials"
+              ? "Email atau kata sandi salah."
+              : error.message,
+          icon: "error",
+          confirmButtonText: "Coba Lagi",
+          confirmButtonColor: colors.primary,
+        });
+        return;
+      }
+
+      // 2. Ambil data user dari tabel public.users
+      const { data: userData, error: userError } = await supabaseBrowser
+        .from("users")
+        .select("is_active")
+        .eq("id", authData.user.id)
+        .single();
+
+      if (userError || !userData) {
+        await Swal.fire({
+          title: "Login Gagal",
+          text: "Data akun tidak ditemukan. Silakan hubungi admin.",
+          icon: "error",
+          confirmButtonColor: colors.primary,
+        });
+        return;
+      }
+
+      // 3. Cek apakah user aktif
+      if (!userData.is_active) {
+        // Logout user
+        await supabaseBrowser.auth.signOut();
+        await Swal.fire({
+          title: "Akun Ditangguhkan",
+          text: "Akun Anda telah ditangguhkan oleh admin. Silakan hubungi admin untuk informasi lebih lanjut.",
+          icon: "error",
+          confirmButtonColor: colors.primary,
+        });
+        return;
+      }
+
+      // 4. Login berhasil, redirect ke dashboard
+      router.replace("/dashboard");
+    } catch (err: any) {
+      await Swal.fire({
+        title: "Terjadi Kesalahan",
+        text:
+          err.message || "Tidak dapat terhubung ke server. Silakan coba lagi.",
+        icon: "error",
+        confirmButtonColor: colors.primary,
       });
-    }, 2000);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
     <div className="flex min-h-screen bg-gray-50">
-      {/* KIRI: Branding (Sama dengan Halaman Daftar untuk konsistensi) */}
+      {/* Kiri: Branding */}
       <div
         className="hidden lg:flex lg:w-[40%] flex-col justify-center px-12 py-12 text-white relative overflow-hidden"
         style={{ backgroundColor: colors.primary }}
@@ -84,15 +127,12 @@ export default function Masuk() {
             pertumbuhan ekonomi Anda secara real-time.
           </p>
         </div>
-
-        {/* Dekorasi Aksesoris (Opsional) */}
-        <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-white/10 rounded-full blur-3xl"></div>
+        <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-white/10 rounded-full blur-3xl" />
       </div>
 
-      {/* KANAN: Form Area */}
+      {/* Kanan: Form */}
       <div className="w-full lg:w-[60%] p-4 md:p-8 lg:p-12 flex items-center justify-center">
         <div className="w-full max-w-xl bg-white rounded-2xl shadow-xl p-8 md:p-12 border border-red-400">
-          {/* HEADER JUDUL */}
           <div className="mb-10">
             <h2 className="text-3xl font-bold text-gray-800">
               Selamat Datang!
@@ -103,21 +143,37 @@ export default function Masuk() {
           </div>
 
           <form onSubmit={handleSubmit(onLogin)} className="space-y-6">
-            <InputGroup
-              label="Email atau Username"
-              type="text"
-              placeholder="Masukkan email atau username"
-              error={errors.identifier?.message}
-              {...register("identifier")}
-            />
+            {/* Email */}
+            <div className="space-y-1">
+              <label className="block text-sm font-semibold text-gray-700">
+                Email
+              </label>
+              <input
+                type="email"
+                placeholder="nama@email.com"
+                className={`w-full p-3 rounded-lg border outline-none transition-all text-sm ${
+                  errors.email
+                    ? "border-red-400 bg-red-50"
+                    : "border-gray-200 focus:border-red-500 focus:ring-1 focus:ring-red-100"
+                }`}
+                style={{ color: colors.textPrimary }}
+                {...register("email")}
+              />
+              {errors.email && (
+                <p className="text-red-500 text-[11px] mt-1 ml-1">
+                  {errors.email.message}
+                </p>
+              )}
+            </div>
 
+            {/* Password */}
             <div className="space-y-1">
               <div className="flex justify-between items-center">
                 <label className="block text-sm font-semibold text-gray-700">
                   Kata Sandi
                 </label>
                 <Link
-                  href="/lupa-password"
+                  href="/autentikasi/lupa-password"
                   className="text-xs font-medium hover:underline"
                   style={{ color: colors.primary }}
                 >
@@ -128,7 +184,11 @@ export default function Masuk() {
                 <input
                   type={showPass ? "text" : "password"}
                   placeholder="••••••••"
-                  className={`w-full p-3 rounded-lg border outline-none transition-all text-sm ${errors.password ? "border-red-400 bg-red-50 focus:border-red-500" : "border-gray-200 focus:border-red-500 focus:ring-1 focus:ring-red-100"}`}
+                  className={`w-full p-3 rounded-lg border outline-none transition-all text-sm ${
+                    errors.password
+                      ? "border-red-400 bg-red-50"
+                      : "border-gray-200 focus:border-red-500 focus:ring-1 focus:ring-red-100"
+                  }`}
                   style={{ color: colors.textPrimary }}
                   {...register("password")}
                 />
@@ -136,13 +196,13 @@ export default function Masuk() {
                   {showPass ? (
                     <EyeOff
                       size={18}
-                      onClick={() => setShowPass(!showPass)}
+                      onClick={() => setShowPass(false)}
                       className="cursor-pointer text-gray-400 hover:text-gray-600"
                     />
                   ) : (
                     <Eye
                       size={18}
-                      onClick={() => setShowPass(!showPass)}
+                      onClick={() => setShowPass(true)}
                       className="cursor-pointer text-gray-400 hover:text-gray-600"
                     />
                   )}
@@ -155,6 +215,7 @@ export default function Masuk() {
               )}
             </div>
 
+            {/* Remember me */}
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -194,69 +255,25 @@ export default function Masuk() {
                       r="10"
                       stroke="currentColor"
                       strokeWidth="4"
-                    ></circle>
+                    />
                     <path
                       className="opacity-75"
                       fill="currentColor"
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    ></path>
+                    />
                   </svg>
                   Memproses...
                 </span>
               ) : (
-                <>Masuk Sekarang</>
+                <>
+                  <LogIn size={18} />
+                  Masuk Sekarang
+                </>
               )}
             </button>
           </form>
-
-          {/* FOOTER NAVIGASI */}
-          <p className="text-center text-sm text-gray-500 mt-10">
-            Belum punya akun?{" "}
-            <Link
-              href="/autentikasi/daftar"
-              className="font-bold hover:underline"
-              style={{ color: colors.primary }}
-            >
-              Daftar Jadi Anggota
-            </Link>
-          </p>
         </div>
       </div>
     </div>
   );
 }
-
-// --- SUB-KOMPONEN BANTUAN (REUSABLE) ---
-
-interface InputGroupProps extends React.InputHTMLAttributes<HTMLInputElement> {
-  label: string;
-  error?: string;
-  rightIcon?: React.ReactNode;
-}
-
-const InputGroup = React.forwardRef<HTMLInputElement, InputGroupProps>(
-  ({ label, error, rightIcon, ...props }, ref) => {
-    const colors = useColors();
-
-    return (
-      <div className="space-y-1">
-        <label className="block text-sm font-semibold text-gray-700">
-          {label}
-        </label>
-        <div className="relative">
-          <input
-            ref={ref}
-            className={`w-full p-3 rounded-lg border outline-none transition-all text-sm ${error ? "border-red-400 bg-red-50 focus:border-red-500" : "border-gray-200 focus:border-red-500 focus:ring-1 focus:ring-red-100"}`}
-            style={{ color: colors.textPrimary }}
-            {...props}
-          />
-          {rightIcon && (
-            <div className="absolute right-3 top-3">{rightIcon}</div>
-          )}
-        </div>
-        {error && <p className="text-red-500 text-[11px] mt-1 ml-1">{error}</p>}
-      </div>
-    );
-  },
-);
-InputGroup.displayName = "InputGroup";

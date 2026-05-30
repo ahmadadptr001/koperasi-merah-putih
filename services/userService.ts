@@ -1,5 +1,6 @@
 // services/userService.ts
-import { createSupabaseServerClient } from "@/lib/supabase";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/server";
 import type {
   User,
   UserInsert,
@@ -46,6 +47,71 @@ export async function getUserById(id: string): Promise<ApiResponse<User>> {
   return { data: data as User, error: null };
 }
 
+/**
+ * Buat akun penuh:
+ * 1. supabaseAdmin.auth.admin.createUser() → auth.users
+ * 2. Trigger handle_new_user() otomatis insert row minimal ke public.users
+ * 3. Update public.users dengan field lengkap (phone, role, avatar_url, is_active)
+ *
+ * Kenapa tidak langsung insert ke public.users?
+ * Karena public.users.id adalah FK → auth.users(id).
+ * Kalau insert langsung tanpa auth user dulu, akan gagal constraint.
+ */
+export async function createUserWithAuth(payload: {
+  email: string;
+  full_name: string;
+  password: string;
+  phone?: string | null;
+  role: User["role"];
+  avatar_url?: string | null;
+  is_active?: boolean;
+}): Promise<ApiResponse<User>> {
+  // ── Step 1: Buat di auth.users via service role ──────────────────────────
+  const { data: authData, error: authError } =
+    await supabaseAdmin.auth.admin.createUser({
+      email: payload.email,
+      password: payload.password,
+      email_confirm: true, // langsung aktif, tidak perlu verifikasi email
+      user_metadata: {
+        full_name: payload.full_name,
+        role: payload.role,
+      },
+    });
+
+  if (authError) {
+    const msg = authError.message.includes("already registered")
+      ? "Email sudah terdaftar di sistem"
+      : authError.message;
+    return { data: null, error: msg };
+  }
+
+  const userId = authData.user.id;
+
+  // ── Step 2: Update public.users dengan data lengkap ──────────────────────
+  // Trigger handle_new_user() sudah insert row dengan id, email, full_name, role.
+  // Kita update untuk mengisi phone, avatar_url, is_active.
+  const { data, error: updateError } = await supabaseAdmin
+    .from("users")
+    .update({
+      phone: payload.phone ?? null,
+      role: payload.role,
+      avatar_url: payload.avatar_url ?? null,
+      is_active: payload.is_active ?? true,
+    })
+    .eq("id", userId)
+    .select()
+    .single();
+
+  if (updateError) return { data: null, error: updateError.message };
+
+  return {
+    data: data as User,
+    error: null,
+    message: `Akun ${payload.full_name} berhasil dibuat`,
+  };
+}
+
+// Tetap ada untuk keperluan lain (misal trigger sudah bikin row, tinggal update)
 export async function createUser(
   payload: UserInsert,
 ): Promise<ApiResponse<User>> {
@@ -98,4 +164,12 @@ export async function toggleUserActive(
   is_active: boolean,
 ): Promise<ApiResponse<User>> {
   return updateUser(id, { is_active });
+}
+
+export async function deleteUserWithAuth(
+  id: string,
+): Promise<ApiResponse<null>> {
+  const { error } = await supabaseAdmin.auth.admin.deleteUser(id);
+  if (error) return { data: null, error: error.message };
+  return { data: null, error: null, message: "Akun berhasil dihapus" };
 }

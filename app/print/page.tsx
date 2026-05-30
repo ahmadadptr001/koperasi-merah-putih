@@ -1,20 +1,54 @@
+"use client";
+
+// app/print/page.tsx
+// CATATAN: Halaman ini butuh "use client" karena pakai useColors (hook React)
+// dan window.print()
+
 import Link from "next/link";
-import { 
-  Users, 
-  Wallet, 
-  ClipboardList, 
-  Landmark,
-  Printer
-} from "lucide-react";
+import { Users, Wallet, ClipboardList, Landmark, Printer } from "lucide-react";
 import { useColors } from "@/hooks/useColors";
 
 export default function PrintPage() {
   const colors = useColors();
 
-  // Warna Cerah & Kontras (sama dengan dashboard)
-  const colorIncome = colors.success; // Hijau cerah
-  const colorExpense = colors.primary; // Merah muda/rose cerah
-  const colorNeutral = colors.info; // Biru cerah
+  const colorIncome = colors.success;
+  const colorExpense = colors.primary;
+  const colorNeutral = colors.info;
+
+  const stats = [
+    {
+      title: "Kekayaan Koperasi",
+      val: "Rp 12.4 M",
+      trend: "+4.2%",
+      icon: Landmark,
+      color: colorIncome,
+      showFromLastMonth: true,
+    },
+    {
+      title: "Total Anggota",
+      val: "1.248",
+      trend: "+12",
+      icon: Users,
+      color: colorNeutral,
+      showFromLastMonth: true,
+    },
+    {
+      title: "Pinjaman Cair",
+      val: "Rp 4.2 M",
+      trend: "342 orang",
+      icon: Wallet,
+      color: "#f59e0b",
+      showFromLastMonth: false,
+    },
+    {
+      title: "Tugas Tertunda",
+      val: "18",
+      trend: "Perlu proses",
+      icon: ClipboardList,
+      color: colorExpense,
+      showFromLastMonth: false,
+    },
+  ];
 
   return (
     <div
@@ -38,48 +72,14 @@ export default function PrintPage() {
         >
           Laporan Koperasi
         </h1>
-        <p
-          style={{
-            color: colors.textSecondary,
-            fontSize: "1.125rem",
-          }}
-        >
+        <p style={{ color: colors.textSecondary, fontSize: "1.125rem" }}>
           Cetak laporan ini untuk dokumentasi atau pertemuan
         </p>
       </div>
 
-      {/* Stats Cards - versi yang lebih cocok untuk print */}
+      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        {[  
-          {
-            title: "Kekayaan Koperasi",
-            val: "Rp 12.4 M",
-            trend: "+4.2%",
-            icon: Landmark,
-            color: colorIncome,
-          },
-          {
-            title: "Total Anggota",
-            val: "1.248",
-            trend: "+12",
-            icon: Users,
-            color: colorNeutral,
-          },
-          {
-            title: "Pinjaman Cair",
-            val: "Rp 4.2 M",
-            trend: "342 orang",
-            icon: Wallet,
-            color: "#f59e0b",
-          },
-          {
-            title: "Tugas Tertunda",
-            val: "18",
-            trend: "Perlu proses",
-            icon: ClipboardList,
-            color: colorExpense,
-          },
-        ].map((card, i) => (
+        {stats.map((card, i) => (
           <div
             key={i}
             style={{
@@ -87,7 +87,6 @@ export default function PrintPage() {
               border: `1px solid ${colors.border}`,
               borderRadius: "0.5rem",
               padding: "1.5rem",
-              textAlign: "center",
             }}
             className="shadow-sm"
           >
@@ -105,7 +104,7 @@ export default function PrintPage() {
                 </p>
                 <h2
                   style={{
-                    color: colors.textSecondary,
+                    color: colors.textPrimary,
                     fontSize: "1.5rem",
                     fontWeight: "bold",
                   }}
@@ -132,7 +131,6 @@ export default function PrintPage() {
               style={{
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
                 gap: "0.5rem",
                 fontSize: "0.875rem",
                 fontWeight: "600",
@@ -148,8 +146,13 @@ export default function PrintPage() {
               >
                 {card.trend}
               </span>
-              {i < 2 && (
-                <span style={{ color: colors.textSecondary, fontSize: "0.75rem" }}>
+              {card.showFromLastMonth && (
+                <span
+                  style={{
+                    color: colors.textSecondary,
+                    fontSize: "0.75rem",
+                  }}
+                >
                   dari bulan lalu
                 </span>
               )}
@@ -178,21 +181,16 @@ export default function PrintPage() {
         >
           Catatan Laporan
         </h2>
-        <p
-          style={{
-            color: colors.textSecondary,
-            lineHeight: "1.6",
-          }}
-        >
-          Laporan ini mencakup informasi terkini tentang kekayaan koperasi, 
-          jumlah anggota, pinjaman yang masih dalam proses cair, dan jumlah 
-          tugas yang masih menunggu persetujuan. Data diperbarui secara 
+        <p style={{ color: colors.textSecondary, lineHeight: "1.6" }}>
+          Laporan ini mencakup informasi terkini tentang kekayaan koperasi,
+          jumlah anggota, pinjaman yang masih dalam proses cair, dan jumlah
+          tugas yang masih menunggu persetujuan. Data diperbarui secara
           real-time dari sistem koperasi.
         </p>
       </div>
 
-      {/* Tombol Print dan Kembali */}
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+      {/* Tombol Aksi */}
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 no-print">
         <button
           onClick={() => window.print()}
           style={{
@@ -207,14 +205,12 @@ export default function PrintPage() {
             display: "inline-flex",
             alignItems: "center",
             gap: "0.5rem",
-            transition: "all 0.2s ease",
           }}
-          className="hover:bg-emerald-50 hover:border-emerald-200 shadow-sm"
         >
           <Printer size={20} />
-          <span>Cetak Laporan</span>
+          Cetak Laporan
         </button>
-        
+
         <Link
           href="/dashboard"
           style={{
@@ -225,34 +221,21 @@ export default function PrintPage() {
             padding: "0.75rem 1.5rem",
             fontSize: "0.875rem",
             fontWeight: "600",
-            cursor: "pointer",
             display: "inline-flex",
             alignItems: "center",
             gap: "0.5rem",
-            transition: "all 0.2s ease",
             textDecoration: "none",
           }}
-          className="hover:bg-slate-50 hover:border-slate-200 shadow-sm"
         >
-          <span>Kembali ke Dashboard</span>
+          Kembali ke Dashboard
         </Link>
       </div>
 
-      {/* Style khusus untuk print - menyembunyikan tombol ketika mencetak */}
       <style>{`
         @media print {
-          .no-print { display: none; }
-          body { 
-            background: white !important; 
-            color: black !important;
-          }
-          * { 
-            box-shadow: none !important; 
-            text-shadow: none !important;
-          }
-          .no-print, .no-print * {
-            display: none !important;
-          }
+          .no-print { display: none !important; }
+          body { background: white !important; color: black !important; }
+          * { box-shadow: none !important; }
         }
       `}</style>
     </div>

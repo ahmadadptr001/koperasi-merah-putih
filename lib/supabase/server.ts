@@ -1,15 +1,13 @@
-// lib/supabase.ts
-// Inisialisasi Supabase client untuk server dan browser
+"server-only";
 
-import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 // Client untuk browser (komponen client-side)
-export const supabaseBrowser = createClient(supabaseUrl, supabaseAnonKey);
 
 // Client untuk server (API routes, Server Components)
 export async function createSupabaseServerClient() {

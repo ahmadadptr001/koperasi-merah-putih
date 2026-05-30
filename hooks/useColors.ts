@@ -4,7 +4,8 @@ import { useTheme } from "@/hooks/useTheme";
 
 export const useColors = () => {
   const { theme } = useTheme();
-  const isLight = theme === "light";
+  const isLight =
+    theme === "light" || theme === "auto" || theme === "" || theme === null;
 
   return {
     // ─── BRAND ───────────────────────────────────────────────

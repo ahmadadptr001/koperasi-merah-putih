@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
       status: body.status ?? "active",
       photo_url: body.photo_url ?? null,
       notes: body.notes ?? null,
+      area: body.area ?? null,
       created_by: body.created_by ?? null,
     });
 

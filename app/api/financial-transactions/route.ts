@@ -13,6 +13,7 @@ import {
   serverError,
 } from "@/lib/api-response";
 import type { FinancialTransactionType } from "@/lib/types";
+import { getLaporanRingkasanPeriode } from "@/services/laporanService";
 
 export async function GET(req: NextRequest) {
   try {
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest) {
       if (!from_date || !to_date)
         return badRequest("from_date dan to_date wajib untuk mode ringkasan");
 
-      const result = await getLaporanRingkasan(from_date, to_date);
+      const result = await getLaporanRingkasanPeriode(from_date, to_date);
       if (result.error) return serverError(result.error);
       return ok(result.data);
     }

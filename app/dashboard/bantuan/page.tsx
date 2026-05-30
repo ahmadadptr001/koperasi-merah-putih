@@ -27,61 +27,124 @@ interface FAQItem {
 }
 
 const faqData: FAQItem[] = [
+  // ── KATEGORI: KEANGGOTAAN ──────────────────────────────────────────────
   {
     id: "1",
-    question: "Bagaimana cara mengajukan pinjaman?",
+    question: "Bagaimana cara mendaftar menjadi anggota koperasi?",
     answer:
-      "Untuk mengajukan pinjaman, klik tombol 'Ajukan Pinjaman Baru' di halaman Pinjaman. Isi formulir dengan jumlah pinjaman, tenor, dan tujuan pinjaman. Pengajuan akan diproses dalam 1-3 hari kerja.",
-    category: "pinjaman",
+      "Pendaftaran anggota hanya bisa dilakukan oleh admin atau pengurus. Buka menu Data Anggota → Tambah Anggota, isi data lengkap (NIK, nama, alamat, dll). Setelah disimpan, anggota akan mendapatkan nomor anggota (format KMP-YYYY-NNNN) dan bisa login menggunakan email yang terdaftar.",
+    category: "keanggotaan",
   },
   {
     id: "2",
-    question: "Apa saja jenis simpanan yang tersedia?",
+    question: "Apa fungsi nomor anggota?",
     answer:
-      "Koperasi menyediakan 3 jenis simpanan: Simpanan Pokok (wajib saat bergabung), Simpanan Wajib (bulanan), dan Simpanan Sukarela (opsional). Setiap jenis memiliki ketentuan dan manfaat berbeda.",
-    category: "simpanan",
+      "Nomor anggota (misal KMP-2026-0012) adalah identitas unik setiap anggota. Digunakan untuk mengakses rekening simpanan, mengajukan pinjaman, dan melacak riwayat transaksi. Nomor ini diberikan otomatis saat pendaftaran.",
+    category: "keanggotaan",
   },
   {
     id: "3",
-    question: "Bagaimana cara mengecek status pinjaman saya?",
+    question: "Bagaimana cara mengubah data diri (profil) anggota?",
     answer:
-      "Status pinjaman dapat dicek di halaman Pinjaman. Anda akan melihat status 'Aktif', 'Lunas', atau 'Menunggu' untuk setiap pengajuan. Notifikasi juga akan dikirim via email/SMS.",
-    category: "pinjaman",
+      "Anggota dapat mengubah data diri melalui halaman Pengaturan → Profil (nama, email, telepon, foto profil). Data seperti nomor anggota, NIK, dan tanggal bergabung tidak dapat diubah sendiri; hubungi admin jika perlu koreksi.",
+    category: "keanggotaan",
   },
+
+  // ── KATEGORI: SIMPANAN ──────────────────────────────────────────────────
   {
     id: "4",
-    question: "Apakah saya bisa menarik simpanan kapan saja?",
+    question: "Apa saja jenis simpanan yang tersedia?",
     answer:
-      "Simpanan Pokok dan Wajib tidak dapat ditarik sepenuhnya. Simpanan Sukarela dapat ditarik dengan syarat minimal saldo tertentu. Penarikan memerlukan persetujuan admin.",
+      "Koperasi menyediakan 3 jenis simpanan: (1) Simpanan Pokok – wajib dibayar saat pertama bergabung, tidak dapat ditarik; (2) Simpanan Wajib – iuran bulanan yang ditetapkan, tidak dapat ditarik; (3) Simpanan Sukarela – tabungan opsional yang bisa disetor kapan saja dan dapat ditarik.",
     category: "simpanan",
   },
   {
     id: "5",
-    question: "Bagaimana cara mengubah password?",
+    question: "Bagaimana cara melakukan setoran simpanan?",
     answer:
-      "Pergi ke halaman Pengaturan > Keamanan. Masukkan password lama, password baru, dan konfirmasi. Pastikan password minimal 6 karakter dan mengandung kombinasi huruf dan angka.",
-    category: "akun",
+      "Admin/pengurus dapat melakukan setoran dengan membuka Simpanan → Setor Simpanan. Pilih anggota, jenis simpanan (pokok/wajib/sukarela), masukkan jumlah setoran, dan tanggal transaksi. Jika rekening untuk jenis simpanan tersebut belum ada, sistem akan otomatis menawarkan pembuatan rekening baru.",
+    category: "simpanan",
   },
   {
     id: "6",
-    question: "Apa yang harus dilakukan jika lupa password?",
+    question: "Apakah saya bisa menarik simpanan kapan saja?",
     answer:
-      "Klik 'Lupa Password' di halaman login. Masukkan email terdaftar dan ikuti instruksi reset password yang dikirim ke email Anda.",
-    category: "akun",
+      "Hanya Simpanan Sukarela yang dapat ditarik. Penarikan dilakukan melalui menu Simpanan → Tarik Simpanan. Pilih anggota dan rekening sukarela, masukkan jumlah penarikan. Penarikan akan langsung mengurangi saldo rekening dan mencatat transaksi keuangan.",
+    category: "simpanan",
   },
   {
     id: "7",
-    question: "Bagaimana cara mengupdate informasi profil?",
+    question: "Mengapa saya tidak bisa menarik Simpanan Pokok atau Wajib?",
     answer:
-      "Kunjungi halaman Pengaturan > Profil. Update nama, email, atau nomor telepon sesuai kebutuhan. Perubahan akan tersimpan otomatis.",
-    category: "akun",
+      "Simpanan Pokok dan Wajib bersifat permanen sebagai modal koperasi. Simpanan Pokok hanya bisa diambil jika anggota keluar atau diberhentikan (dengan persetujuan pengurus). Simpanan Wajib merupakan iuran rutin yang tidak dapat ditarik.",
+    category: "simpanan",
   },
+
+  // ── KATEGORI: PINJAMAN ──────────────────────────────────────────────────
   {
     id: "8",
-    question: "Apakah ada biaya administrasi untuk pinjaman?",
+    question: "Bagaimana cara mengajukan pinjaman?",
     answer:
-      "Ya, terdapat biaya administrasi sebesar 1% dari jumlah pinjaman. Biaya ini akan dipotong dari pencairan pinjaman.",
+      "Buka menu Pinjaman → Ajukan Pinjaman Baru. Isi jumlah pinjaman (minimal Rp1.000.000, maksimal Rp50.000.000), pilih tenor (3–24 bulan), dan jelaskan tujuan pinjaman. Jika Anda anggota biasa, sistem akan otomatis menggunakan data anggota Anda. Admin/pengurus bisa memilih anggota lain.",
     category: "pinjaman",
+  },
+  {
+    id: "9",
+    question: "Berapa bunga pinjaman dan bagaimana perhitungannya?",
+    answer:
+      "Bunga flat 1% per bulan dihitung dari pokok pinjaman. Contoh: pinjaman Rp10.000.000 dengan tenor 12 bulan, bunga per bulan = Rp100.000, total bunga = Rp1.200.000, cicilan per bulan = Rp10.000.000/12 + Rp100.000 = Rp933.333.",
+    category: "pinjaman",
+  },
+  {
+    id: "10",
+    question: "Bagaimana proses persetujuan pinjaman?",
+    answer:
+      "Pengajuan pinjaman akan masuk dengan status 'pending'. Admin atau pengurus akan meninjau di menu Persetujuan. Jika disetujui, status berubah menjadi 'approved'. Selanjutnya, admin/pengurus dapat mencairkan pinjaman dengan mengisi tanggal cair dan tenor (di halaman detail pinjaman).",
+    category: "pinjaman",
+  },
+  {
+    id: "11",
+    question: "Bagaimana cara membayar angsuran pinjaman?",
+    answer:
+      "Pembayaran angsuran dilakukan oleh admin/pengurus. Buka menu Pinjaman → pilih pinjaman aktif → klik 'Bayar' pada angsuran yang belum dibayar. Masukkan jumlah pembayaran (sesuai tagihan) dan tanggal. Jika terlambat, denda dihitung otomatis (Rp1.000 per hari).",
+    category: "pinjaman",
+  },
+  {
+    id: "12",
+    question: "Apa yang terjadi jika saya telat membayar angsuran?",
+    answer:
+      "Jika melewati jatuh tempo, status angsuran berubah menjadi 'overdue' dan status pinjaman menjadi 'terlambat'. Denda keterlambatan akan ditambahkan ke angsuran berikutnya. Segera hubungi admin untuk menyelesaikan pembayaran.",
+    category: "pinjaman",
+  },
+
+  // ── KATEGORI: PENGATURAN & AKUN ────────────────────────────────────────
+  {
+    id: "13",
+    question: "Bagaimana cara mengubah password?",
+    answer:
+      "Buka Pengaturan → Keamanan, lalu klik 'Kirim Link Reset Password'. Email reset akan dikirim ke alamat email terdaftar. Ikuti instruksi di email untuk membuat password baru.",
+    category: "pengaturan",
+  },
+  {
+    id: "14",
+    question: "Apa yang harus dilakukan jika lupa password?",
+    answer:
+      "Di halaman login, klik 'Lupa kata sandi?'. Masukkan email terdaftar. Kami akan mengirim link reset password ke email Anda. Link berlaku selama 1 jam.",
+    category: "pengaturan",
+  },
+  {
+    id: "15",
+    question: "Apakah saya bisa melihat riwayat transaksi saya?",
+    answer:
+      "Ya. Anggota dapat melihat riwayat pinjaman dan pembayaran di menu Pinjaman. Untuk riwayat simpanan, hanya admin/pengurus yang memiliki akses ke seluruh transaksi simpanan anggota.",
+    category: "pengaturan",
+  },
+  {
+    id: "16",
+    question: "Apa perbedaan role admin, pengurus, dan anggota?",
+    answer:
+      "Admin: akses penuh ke semua menu, termasuk manajemen user dan role. Pengurus: dapat mengelola anggota, simpanan, pinjaman, persetujuan, dan laporan keuangan. Anggota: hanya dapat melihat data pinjaman milik sendiri dan mengubah profil pribadi.",
+    category: "pengaturan",
   },
 ];
 
@@ -126,7 +189,8 @@ const guideSections = [
 export default function HalamanBantuan() {
   const colors = useColors();
   const { theme } = useTheme();
-  const isLight = theme == "light";
+  const isLight =
+    theme == "light" || theme == "auto" || theme == "" || theme == null;
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("semua");
   const [openFAQ, setOpenFAQ] = useState<string | null>(null);
@@ -395,13 +459,13 @@ export default function HalamanBantuan() {
             <button
               className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-sm font-medium"
               onClick={async () => {
-  await Swal.fire({
-    title: "Fitur Live Chat",
-    text: "Fitur live chat akan segera hadir!",
-    icon: "info",
-    confirmButtonText: "OK"
-  });
-}}
+                await Swal.fire({
+                  title: "Fitur Live Chat",
+                  text: "Fitur live chat akan segera hadir!",
+                  icon: "info",
+                  confirmButtonText: "OK",
+                });
+              }}
             >
               Mulai Chat
             </button>

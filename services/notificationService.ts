@@ -1,5 +1,5 @@
 // services/notificationService.ts
-import { createSupabaseServerClient } from "@/lib/supabase";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type {
   NotificationPref,
   NotificationPrefInsert,
@@ -11,13 +11,11 @@ export async function getNotificationPrefByUserId(
   userId: string,
 ): Promise<ApiResponse<NotificationPref>> {
   const supabase = await createSupabaseServerClient();
-
   const { data, error } = await supabase
     .from("notification_prefs")
     .select("*")
     .eq("user_id", userId)
     .single();
-
   if (error) return { data: null, error: error.message };
   return { data: data as NotificationPref, error: null };
 }
@@ -46,15 +44,29 @@ export async function createOrUpdateNotificationPref(
 ): Promise<ApiResponse<NotificationPref>> {
   const supabase = await createSupabaseServerClient();
 
-  const { data, error } = await supabase
+  // Siapkan payload dengan default values
+  const data = {
+    user_id: payload.user_id,
+    email_notifications: payload.email_notifications ?? true,
+    sms_notifications: payload.sms_notifications ?? false,
+    push_notifications: payload.push_notifications ?? false,
+    loan_due_reminder: payload.loan_due_reminder ?? true,
+    payment_confirmation: payload.payment_confirmation ?? true,
+    new_member_notification: payload.new_member_notification ?? false,
+    loan_approval_update: payload.loan_approval_update ?? true,
+    monthly_report: payload.monthly_report ?? false,
+    reminder_days_before: payload.reminder_days_before ?? 3,
+  };
+
+  const { data: result, error } = await supabase
     .from("notification_prefs")
-    .upsert(payload, { onConflict: "user_id" })
+    .upsert(data, { onConflict: "user_id" })
     .select()
     .single();
 
   if (error) return { data: null, error: error.message };
   return {
-    data: data as NotificationPref,
+    data: result as NotificationPref,
     error: null,
     message: "Preferensi notifikasi berhasil disimpan",
   };

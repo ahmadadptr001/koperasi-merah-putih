@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+// app/dashboard/tambah-akun/page.tsx
+import { useState, useRef, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -12,44 +13,45 @@ import {
   Mail,
   Lock,
   ShieldCheck,
+  Phone,
+  UploadCloud,
+  X,
+  ImageIcon,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import { useColors } from "@/hooks/useColors";
 import { useTheme } from "@/hooks/useTheme";
+import type { UserRole } from "@/lib/types";
 
-// ── Schema Validasi ────────────────────────────────────────────────
+// ── Schema ────────────────────────────────────────────────────────────────────
 const schema = z
   .object({
     namaLengkap: z.string().min(3, "Nama lengkap minimal 3 karakter"),
-    username: z
-      .string()
-      .min(4, "Username minimal 4 karakter")
-      .regex(
-        /^[a-zA-Z0-9_]+$/,
-        "Username hanya boleh huruf, angka, dan underscore",
-      ),
     email: z.string().email("Format email tidak valid"),
-    role: z.enum(["admin", "bendahara", "pengurus", "anggota"], {
-       message: "Pilih role yang valid" ,
+    phone: z
+      .string()
+      .regex(/^(\+62|08)\d{8,12}$/, "Format tidak valid (contoh: 08123456789)")
+      .optional()
+      .or(z.literal("")),
+    role: z.enum(["admin", "pengurus", "anggota"] as const, {
+      message: "Pilih role yang valid",
     }),
     password: z.string().min(8, "Password minimal 8 karakter"),
     konfirmasiPassword: z.string(),
   })
-  .refine((data) => data.password === data.konfirmasiPassword, {
+  .refine((d) => d.password === d.konfirmasiPassword, {
     message: "Password tidak cocok",
     path: ["konfirmasiPassword"],
   });
 
 type FormData = z.infer<typeof schema>;
 
-// ── Role Options ───────────────────────────────────────────────────
-const roleOptions = [
+const roleOptions: { value: UserRole; label: string; desc: string }[] = [
   { value: "admin", label: "Admin", desc: "Akses penuh ke seluruh sistem" },
-  { value: "bendahara", label: "Bendahara", desc: "Kelola keuangan & laporan" },
   {
     value: "pengurus",
     label: "Pengurus",
-    desc: "Kelola data anggota & transaksi",
+    desc: "Kelola anggota, simpanan & keuangan",
   },
   {
     value: "anggota",
@@ -58,7 +60,9 @@ const roleOptions = [
   },
 ];
 
-// ── Komponen Utama ─────────────────────────────────────────────────
+const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const MAX_SIZE_MB = 2;
+
 export default function TambahAkunPage() {
   const colors = useColors();
   const { theme } = useTheme();
@@ -68,39 +72,104 @@ export default function TambahAkunPage() {
   const [showKonfirmasi, setShowKonfirmasi] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Avatar state
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const {
     register,
     handleSubmit,
     reset,
     watch,
     formState: { errors },
-  } = useForm<FormData>({
-    resolver: zodResolver(schema),
-  });
+  } = useForm<FormData>({ resolver: zodResolver(schema) });
 
   const passwordValue = watch("password", "");
 
-  // Indikator kekuatan password
   const getPasswordStrength = (pw: string) => {
     if (!pw) return { level: 0, label: "", color: "" };
-    let score = 0;
-    if (pw.length >= 8) score++;
-    if (/[A-Z]/.test(pw)) score++;
-    if (/[0-9]/.test(pw)) score++;
-    if (/[^a-zA-Z0-9]/.test(pw)) score++;
-    if (score <= 1) return { level: 1, label: "Lemah", color: "#ef4444" };
-    if (score === 2) return { level: 2, label: "Sedang", color: "#f59e0b" };
-    if (score === 3) return { level: 3, label: "Kuat", color: "#3b82f6" };
+    let s = 0;
+    if (pw.length >= 8) s++;
+    if (/[A-Z]/.test(pw)) s++;
+    if (/[0-9]/.test(pw)) s++;
+    if (/[^a-zA-Z0-9]/.test(pw)) s++;
+    if (s <= 1) return { level: 1, label: "Lemah", color: "#ef4444" };
+    if (s === 2) return { level: 2, label: "Sedang", color: "#f59e0b" };
+    if (s === 3) return { level: 3, label: "Kuat", color: "#3b82f6" };
     return { level: 4, label: "Sangat Kuat", color: "#10b981" };
   };
 
   const strength = getPasswordStrength(passwordValue);
 
+  // ── Avatar helpers ────────────────────────────────────────────────────────
+  const processAvatarFile = useCallback(
+    (file: File) => {
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        Swal.fire({
+          icon: "error",
+          title: "Format tidak didukung",
+          text: "Gunakan JPG, PNG, atau WebP.",
+          confirmButtonColor: colors.primary,
+        });
+        return;
+      }
+      if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+        Swal.fire({
+          icon: "error",
+          title: "File terlalu besar",
+          text: `Maksimal ${MAX_SIZE_MB} MB.`,
+          confirmButtonColor: colors.primary,
+        });
+        return;
+      }
+      setAvatarFile(file);
+      setAvatarPreview(URL.createObjectURL(file));
+    },
+    [colors.primary],
+  );
+
+  const removeAvatar = () => {
+    setAvatarFile(null);
+    setAvatarPreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  // Drag handlers
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) processAvatarFile(file);
+  };
+
+  // ── Submit — satu FormData, satu request, atomik di server ───────────────
   const onSubmit = async (data: FormData) => {
     setIsLoading(true);
     try {
-      // Simulasi proses simpan (ganti dengan API call jika sudah ada backend)
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      const fd = new FormData();
+      fd.append("email", data.email);
+      fd.append("full_name", data.namaLengkap);
+      fd.append("password", data.password);
+      fd.append("role", data.role);
+      if (data.phone) fd.append("phone", data.phone);
+      if (avatarFile) fd.append("avatar", avatarFile);
+      // Tidak perlu Content-Type — browser set sendiri dengan boundary
+
+      const res = await fetch("/api/users", { method: "POST", body: fd });
+      const result = await res.json();
+
+      if (!res.ok || result.error)
+        throw new Error(result.error ?? "Gagal membuat akun");
 
       await Swal.fire({
         icon: "success",
@@ -113,11 +182,15 @@ export default function TambahAkunPage() {
       });
 
       reset();
-    } catch {
+      removeAvatar();
+    } catch (err) {
       Swal.fire({
         icon: "error",
         title: "Gagal",
-        text: "Terjadi kesalahan saat membuat akun. Coba lagi.",
+        text:
+          err instanceof Error
+            ? err.message
+            : "Terjadi kesalahan saat membuat akun.",
         confirmButtonColor: colors.primary,
       });
     } finally {
@@ -136,10 +209,13 @@ export default function TambahAkunPage() {
       confirmButtonText: "Ya, Reset",
       cancelButtonText: "Batal",
     });
-    if (result.isConfirmed) reset();
+    if (result.isConfirmed) {
+      reset();
+      removeAvatar();
+    }
   };
 
-  // ── Styles Dinamis ───────────────────────────────────────────────
+  // ── Styles ────────────────────────────────────────────────────────────────
   const cardBg = isDark ? "#1e2433" : "#ffffff";
   const pageBg = isDark ? "#111827" : "#f3f4f6";
   const textPrimary = isDark ? "#f9fafb" : "#111827";
@@ -148,11 +224,8 @@ export default function TambahAkunPage() {
   const inputBorder = isDark ? "#4b5563" : "#e5e7eb";
   const inputText = isDark ? "#f9fafb" : "#111827";
 
-  const inputClass = `
-    w-full pl-10 pr-4 py-3 rounded-xl text-sm outline-none border transition-all
-    focus:ring-2 focus:border-transparent
-  `;
-
+  const inputClass =
+    "w-full pl-10 pr-4 py-3 rounded-xl text-sm outline-none border transition-all focus:ring-2 focus:border-transparent";
   const inputStyle = {
     backgroundColor: inputBg,
     borderColor: inputBorder,
@@ -161,7 +234,7 @@ export default function TambahAkunPage() {
 
   return (
     <div className="min-h-screen p-6" style={{ backgroundColor: pageBg }}>
-      {/* ── Header ── */}
+      {/* Header */}
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-1">
           <div
@@ -179,14 +252,144 @@ export default function TambahAkunPage() {
         </p>
       </div>
 
-      {/* ── Form Card ── */}
+      {/* Form Card */}
       <div
         className="max-w-2xl mx-auto rounded-2xl shadow-sm border p-8"
         style={{ backgroundColor: cardBg, borderColor: inputBorder }}
       >
         <form onSubmit={handleSubmit(onSubmit)} noValidate>
           <div className="space-y-5">
-            {/* Nama Lengkap */}
+            {/* ── Avatar Upload — Drag & Drop ── */}
+            <div>
+              <label
+                className="block text-sm font-semibold mb-1.5"
+                style={{ color: textPrimary }}
+              >
+                Foto Profil{" "}
+                <span className="font-normal" style={{ color: textSecondary }}>
+                  (opsional)
+                </span>
+              </label>
+
+              {avatarPreview ? (
+                /* ── Preview mode ── */
+                <div className="flex items-center gap-4">
+                  <div
+                    className="relative w-20 h-20 rounded-2xl overflow-hidden shrink-0 border-2"
+                    style={{ borderColor: colors.primary }}
+                  >
+                    <img
+                      src={avatarPreview}
+                      alt="preview"
+                      className="w-full h-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={removeAvatar}
+                      className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center shadow"
+                      style={{ backgroundColor: "#ef4444" }}
+                    >
+                      <X size={10} color="white" />
+                    </button>
+                  </div>
+                  <div>
+                    <p
+                      className="text-sm font-medium truncate max-w-[200px]"
+                      style={{ color: textPrimary }}
+                    >
+                      {avatarFile?.name}
+                    </p>
+                    <p
+                      className="text-xs mt-0.5"
+                      style={{ color: textSecondary }}
+                    >
+                      {avatarFile ? (avatarFile.size / 1024).toFixed(0) : 0} KB
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="text-xs mt-2 font-semibold underline underline-offset-2"
+                      style={{ color: colors.primary }}
+                    >
+                      Ganti foto
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* ── Dropzone mode ── */
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="relative flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed cursor-pointer transition-all duration-200 py-8"
+                  style={{
+                    borderColor: isDragging ? colors.primary : inputBorder,
+                    backgroundColor: isDragging
+                      ? `${colors.primary}10`
+                      : inputBg,
+                  }}
+                >
+                  <div
+                    className="w-12 h-12 rounded-xl flex items-center justify-center transition-all duration-200"
+                    style={{
+                      backgroundColor: isDragging
+                        ? `${colors.primary}25`
+                        : `${colors.primary}15`,
+                    }}
+                  >
+                    {isDragging ? (
+                      <UploadCloud
+                        size={22}
+                        style={{ color: colors.primary }}
+                      />
+                    ) : (
+                      <ImageIcon size={22} style={{ color: colors.primary }} />
+                    )}
+                  </div>
+                  <div className="text-center">
+                    <p
+                      className="text-sm font-semibold"
+                      style={{
+                        color: isDragging ? colors.primary : textPrimary,
+                      }}
+                    >
+                      {isDragging
+                        ? "Lepaskan untuk upload"
+                        : "Drag & drop foto di sini"}
+                    </p>
+                    <p
+                      className="text-xs mt-0.5"
+                      style={{ color: textSecondary }}
+                    >
+                      atau{" "}
+                      <span
+                        className="font-semibold underline underline-offset-2"
+                        style={{ color: colors.primary }}
+                      >
+                        klik untuk memilih
+                      </span>
+                    </p>
+                  </div>
+                  <p className="text-xs" style={{ color: textSecondary }}>
+                    JPG, PNG, WebP · Maks. {MAX_SIZE_MB} MB
+                  </p>
+                </div>
+              )}
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) processAvatarFile(f);
+                }}
+              />
+            </div>
+
+            {/* ── Nama Lengkap ── */}
             <div>
               <label
                 className="block text-sm font-semibold mb-1.5"
@@ -218,40 +421,7 @@ export default function TambahAkunPage() {
               )}
             </div>
 
-            {/* Username */}
-            <div>
-              <label
-                className="block text-sm font-semibold mb-1.5"
-                style={{ color: textPrimary }}
-              >
-                Username <span style={{ color: colors.primary }}>*</span>
-              </label>
-              <div className="relative">
-                <span
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold"
-                  style={{ color: textSecondary }}
-                >
-                  @
-                </span>
-                <input
-                  {...register("username")}
-                  type="text"
-                  placeholder="ahmad_adi"
-                  className={inputClass}
-                  style={{
-                    ...inputStyle,
-                    ...(errors.username ? { borderColor: "#ef4444" } : {}),
-                  }}
-                />
-              </div>
-              {errors.username && (
-                <p className="text-xs mt-1.5 text-red-500">
-                  {errors.username.message}
-                </p>
-              )}
-            </div>
-
-            {/* Email */}
+            {/* ── Email ── */}
             <div>
               <label
                 className="block text-sm font-semibold mb-1.5"
@@ -283,7 +453,42 @@ export default function TambahAkunPage() {
               )}
             </div>
 
-            {/* Role */}
+            {/* ── Phone ── */}
+            <div>
+              <label
+                className="block text-sm font-semibold mb-1.5"
+                style={{ color: textPrimary }}
+              >
+                Nomor HP{" "}
+                <span className="font-normal" style={{ color: textSecondary }}>
+                  (opsional)
+                </span>
+              </label>
+              <div className="relative">
+                <Phone
+                  size={16}
+                  className="absolute left-3 top-1/2 -translate-y-1/2"
+                  style={{ color: textSecondary }}
+                />
+                <input
+                  {...register("phone")}
+                  type="tel"
+                  placeholder="Contoh: 08123456789"
+                  className={inputClass}
+                  style={{
+                    ...inputStyle,
+                    ...(errors.phone ? { borderColor: "#ef4444" } : {}),
+                  }}
+                />
+              </div>
+              {errors.phone && (
+                <p className="text-xs mt-1.5 text-red-500">
+                  {errors.phone.message}
+                </p>
+              )}
+            </div>
+
+            {/* ── Role ── */}
             <div>
               <label
                 className="block text-sm font-semibold mb-1.5"
@@ -320,7 +525,7 @@ export default function TambahAkunPage() {
               )}
             </div>
 
-            {/* Divider */}
+            {/* ── Divider ── */}
             <div className="pt-1 pb-1">
               <div className="flex items-center gap-3">
                 <div
@@ -340,7 +545,7 @@ export default function TambahAkunPage() {
               </div>
             </div>
 
-            {/* Password */}
+            {/* ── Password ── */}
             <div>
               <label
                 className="block text-sm font-semibold mb-1.5"
@@ -367,14 +572,12 @@ export default function TambahAkunPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 transition-opacity hover:opacity-70"
+                  className="absolute right-3 top-1/2 -translate-y-1/2"
                   style={{ color: textSecondary }}
                 >
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
-
-              {/* Password Strength */}
               {passwordValue && (
                 <div className="mt-2 space-y-1">
                   <div className="flex gap-1">
@@ -397,7 +600,6 @@ export default function TambahAkunPage() {
                   </p>
                 </div>
               )}
-
               {errors.password && (
                 <p className="text-xs mt-1.5 text-red-500">
                   {errors.password.message}
@@ -405,7 +607,7 @@ export default function TambahAkunPage() {
               )}
             </div>
 
-            {/* Konfirmasi Password */}
+            {/* ── Konfirmasi Password ── */}
             <div>
               <label
                 className="block text-sm font-semibold mb-1.5"
@@ -435,7 +637,7 @@ export default function TambahAkunPage() {
                 <button
                   type="button"
                   onClick={() => setShowKonfirmasi((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 transition-opacity hover:opacity-70"
+                  className="absolute right-3 top-1/2 -translate-y-1/2"
                   style={{ color: textSecondary }}
                 >
                   {showKonfirmasi ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -463,7 +665,6 @@ export default function TambahAkunPage() {
             >
               Reset Form
             </button>
-
             <button
               type="submit"
               disabled={isLoading}

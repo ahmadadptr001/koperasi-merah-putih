@@ -5,6 +5,7 @@ import {
   updateLoan,
   approveLoan,
   disburseLoan,
+  deleteLoan,
 } from "@/services/loanService";
 import { ok, notFound, badRequest, serverError } from "@/lib/api-response";
 
@@ -55,6 +56,19 @@ export async function PUT(req: NextRequest, { params }: Params) {
     const result = await updateLoan(id, body);
     if (result.error) return serverError(result.error);
     return ok(result.data, result.message);
+  } catch (e) {
+    return serverError(e);
+  }
+}
+
+export async function DELETE(_req: NextRequest, { params }: Params) {
+  try {
+    const { id } = await params;
+    if (!id) return badRequest("ID tidak valid");
+
+    const result = await deleteLoan(id);
+    if (result.error) return serverError(result.error);
+    return ok(null, result.message);
   } catch (e) {
     return serverError(e);
   }

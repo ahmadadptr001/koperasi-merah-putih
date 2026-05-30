@@ -1,5 +1,5 @@
 // services/financialService.ts
-import { createSupabaseServerClient } from "@/lib/supabase";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type {
   FinancialTransaction,
   FinancialTransactionInsert,

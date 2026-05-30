@@ -1,156 +1,361 @@
 "use client";
 
-import { notFound, useRouter } from "next/navigation";
-import PrintLayout from "@/components/print/PrintLayout";
-import { useParams } from "next/navigation";
+// app/dashboard/pinjaman/[id]/print/page.tsx
+
 import { useEffect, useRef, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { useReactToPrint } from "react-to-print";
+import { Loader2, XCircle } from "lucide-react";
+import type { Loan, Member } from "@/lib/types";
 
-type PinjamanTransaction = {
-  id: string;
-  date: string;
-  amount: number;
-  interest: string;
-  tenor: string;
-  status: string;
-  due: string;
-  installment: number;
-  paid: number;
-  remaining: number;
-  purpose: string;
-  nik: string;
-  name: string;
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const fmtCurrency = (v: number) =>
+  new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  }).format(v);
+
+const fmtDate = (d: string | null | undefined) => {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("id-ID", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
 };
 
-// Mock data - in a real app, you would fetch this from an API or context
-const mockPinjamanData = {
-  "PJ-001": {
-    id: "PJ-001",
-    date: "12 Apr 2026",
-    amount: 5000000,
-    interest: "1%",
-    tenor: "12 Bulan",
-    status: "Aktif",
-    due: "12 Mei 2026",
-    installment: 455000,
-    paid: 1580000,
-    remaining: 3420000,
-    purpose: "Modal usaha tani dan pembelian pupuk.",
-    nik: "7203000000000001",
-    name: "Siti Aminah",
-  },
-  "PJ-002": {
-    id: "PJ-002",
-    date: "05 Jan 2026",
-    amount: 2000000,
-    interest: "1%",
-    tenor: "6 Bulan",
-    status: "Lunas",
-    due: "-",
-    installment: 345000,
-    paid: 2070000,
-    remaining: 0,
-    purpose: "Pembelian alat produksi rumahan.",
-    nik: "7203000000000002",
-    name: "Ahmad Subagyo",
-  },
-  // Add more as needed
-};
+// ─── Print Content ────────────────────────────────────────────────────────────
+
+function PrintContent({
+  loan,
+  member,
+  printRef,
+}: {
+  loan: Loan;
+  member: Member | null;
+  printRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const printDate = new Date().toLocaleDateString("id-ID", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const borrowerName = member?.full_name || loan.requested_by || "—";
+
+  return (
+    <div
+      ref={printRef}
+      className="bg-white text-gray-900"
+      style={{
+        width: "148mm",
+        minHeight: "210mm",
+        padding: "12mm",
+        fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+        fontSize: "11px",
+        lineHeight: "1.5",
+      }}
+    >
+      {/* Kop surat */}
+      <div
+        style={{
+          borderBottom: "2px solid #111",
+          paddingBottom: "10px",
+          marginBottom: "14px",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <img
+            src="/logo-kabupaten-konawe.png"
+            alt="Logo"
+            style={{ width: "48px", height: "48px", objectFit: "contain" }}
+          />
+          <div>
+            <p style={{ fontWeight: "900", fontSize: "14px", margin: 0 }}>
+              KOPERASI MERAH PUTIH
+            </p>
+            <p style={{ color: "#555", margin: "2px 0 0" }}>
+              Desa Tani Indah · Kab. Konawe · Sulawesi Tenggara
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Judul */}
+      <div style={{ textAlign: "center", marginBottom: "16px" }}>
+        <p
+          style={{
+            fontWeight: "900",
+            fontSize: "13px",
+            textTransform: "uppercase",
+            letterSpacing: "2px",
+            margin: 0,
+          }}
+        >
+          BUKTI PINJAMAN
+        </p>
+        <p style={{ color: "#777", fontSize: "10px", marginTop: "4px" }}>
+          No. Pinjaman: {loan.loan_number}
+        </p>
+      </div>
+
+      {/* Nominal besar */}
+      <div
+        style={{
+          background: "#f0fdf4",
+          border: "1px solid #bbf7d0",
+          borderRadius: "8px",
+          padding: "12px 16px",
+          marginBottom: "16px",
+          textAlign: "center",
+        }}
+      >
+        <p
+          style={{
+            color: "#15803d",
+            fontWeight: "700",
+            fontSize: "10px",
+            margin: "0 0 4px",
+          }}
+        >
+          JUMLAH PINJAMAN
+        </p>
+        <p
+          style={{
+            fontWeight: "900",
+            fontSize: "22px",
+            color: "#14532d",
+            margin: 0,
+          }}
+        >
+          {fmtCurrency(loan.amount)}
+        </p>
+      </div>
+
+      {/* Tabel detail */}
+      <table
+        style={{
+          width: "100%",
+          borderCollapse: "collapse",
+          marginBottom: "16px",
+        }}
+      >
+        <tbody>
+          {[
+            ["Nama Pemohon", borrowerName],
+            ["Jumlah Pinjaman", fmtCurrency(loan.amount)],
+            ["Bunga / Bulan", `${loan.interest_rate}%`],
+            ["Tenor", `${loan.term_months} Bulan`],
+            ["Cicilan / Bulan", fmtCurrency(loan.monthly_payment)],
+            ["Total Pembayaran", fmtCurrency(loan.total_payment)],
+            ["Status", loan.status],
+            ["Tanggal Pengajuan", fmtDate(loan.applied_date)],
+            loan.approved_date
+              ? ["Tanggal Disetujui", fmtDate(loan.approved_date)]
+              : null,
+            loan.disbursement_date
+              ? ["Tanggal Cair", fmtDate(loan.disbursement_date)]
+              : null,
+            loan.due_date
+              ? ["Jatuh Tempo Akhir", fmtDate(loan.due_date)]
+              : null,
+            loan.purpose ? ["Tujuan Pinjaman", loan.purpose] : null,
+          ]
+            .filter(Boolean)
+            .map(([label, value]: any, i) => (
+              <tr key={i} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                <td style={{ padding: "6px 8px", color: "#555", width: "45%" }}>
+                  {label}
+                </td>
+                <td style={{ padding: "6px 8px", fontWeight: "600" }}>
+                  {value}
+                </td>
+              </tr>
+            ))}
+        </tbody>
+      </table>
+
+      {/* Tanda tangan */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginTop: "32px",
+        }}
+      >
+        <div style={{ textAlign: "center" }}>
+          <p style={{ margin: "0 0 48px", fontSize: "10px" }}>Nasabah,</p>
+          <div
+            style={{
+              borderBottom: "1px solid #333",
+              width: "120px",
+              margin: "0 auto 4px",
+            }}
+          />
+          <p style={{ margin: 0, fontSize: "10px", color: "#555" }}>
+            {borrowerName}
+          </p>
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <p style={{ margin: "0 0 48px", fontSize: "10px" }}>Petugas,</p>
+          <div
+            style={{
+              borderBottom: "1px solid #333",
+              width: "120px",
+              margin: "0 auto 4px",
+            }}
+          />
+          <p style={{ margin: 0, fontSize: "10px", color: "#555" }}>
+            Tanda Tangan
+          </p>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div
+        style={{
+          marginTop: "20px",
+          paddingTop: "10px",
+          borderTop: "1px solid #e5e7eb",
+          textAlign: "center",
+          color: "#999",
+          fontSize: "9px",
+        }}
+      >
+        <p style={{ margin: 0 }}>Dicetak pada {printDate}</p>
+        <p style={{ margin: "2px 0 0" }}>
+          Bukti ini sah sebagai tanda terima transaksi pinjaman.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function PinjamanPrintPage() {
   const router = useRouter();
   const params = useParams();
-  const elementPrintRef = useRef(null);
-  const id = params.id as keyof typeof mockPinjamanData;
-  const [pinjaman, setPinjaman] = useState<PinjamanTransaction | null>(null);
+  const id = params.id as string;
+
+  const printRef = useRef<HTMLDivElement>(null);
+  const [loan, setLoan] = useState<Loan | null>(null);
+  const [member, setMember] = useState<Member | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const hasPrinted = useRef(false);
 
-  const handlePrint = useReactToPrint({ contentRef: elementPrintRef });
-  
-  let current = 0;
-  useEffect(() => {
-    if (current > 0) return;
-    if (!pinjaman) return;
-    handlePrint();
-    current++;
-    router.back();
-  }, [pinjaman]);
+  // Setup react-to-print
+  const handlePrint = useReactToPrint({
+    contentRef: printRef,
+    onAfterPrint: () => {
+      setTimeout(() => router.back(), 300);
+    },
+  });
 
+  // 1. Fetch data pinjaman
   useEffect(() => {
-    // Simulate data fetching
-    setTimeout(() => {
-      const data = mockPinjamanData[id];
-      if (data) {
-        setPinjaman(data);
-      } else {
-        // If not found, we'll handle with notFound() in render
-      }
-      setLoading(false);
-    }, 100);
+    if (!id) return;
+
+    fetch(`/api/loans/${id}`)
+      .then(async (res) => {
+        const json = await res.json();
+        if (!res.ok || json.error)
+          throw new Error(json.error ?? "Data pinjaman tidak ditemukan");
+        return json.data as Loan;
+      })
+      .then((data) => {
+        setLoan(data);
+        // 2. Setelah pinjaman didapat, fetch data anggota (member)
+        if (data.member_id) {
+          return fetch(`/api/members/${data.member_id}`)
+            .then(async (memberRes) => {
+              const memberJson = await memberRes.json();
+              if (!memberRes.ok || memberJson.error) {
+                // Jika anggota tidak ditemukan, tidak masalah, kita tetap bisa print dengan requested_by
+                console.warn("Anggota tidak ditemukan:", memberJson.error);
+                return null;
+              }
+              return memberJson.data as Member;
+            })
+            .then((memberData) => {
+              setMember(memberData);
+            });
+        }
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
   }, [id]);
 
+  // Auto-print saat data siap
+  useEffect(() => {
+    if (!loan || hasPrinted.current || loading) return;
+    hasPrinted.current = true;
+
+    const timeout = setTimeout(() => {
+      handlePrint();
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [loan, loading, handlePrint]);
+
+  // ─── Loading ──────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="flex h-[210mm] w-[148mm] items-center justify-center">
-        Loading...
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-gray-50">
+        <Loader2 size={36} className="animate-spin text-red-600" />
+        <p className="text-sm font-semibold text-gray-600">
+          Menyiapkan dokumen cetak...
+        </p>
       </div>
     );
   }
 
-  if (!pinjaman) {
-    notFound();
+  // ─── Error ────────────────────────────────────────────────────────────────
+  if (error || !loan) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-gray-50">
+        <XCircle size={36} className="text-red-500" />
+        <p className="text-sm font-semibold text-gray-600">
+          {error ?? "Transaksi tidak ditemukan"}
+        </p>
+        <button
+          onClick={() => router.back()}
+          className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-bold text-white"
+        >
+          Kembali
+        </button>
+      </div>
+    );
   }
 
-  const formatCurrency = (value: number) =>
-    new Intl.NumberFormat("id-ID", {
-      style: "currency",
-      currency: "IDR",
-      maximumFractionDigits: 0,
-    }).format(value);
-
+  // ─── Render (tersembunyi, hanya untuk print) ──────────────────────────────
   return (
-    <PrintLayout
-      elementPrintRef={elementPrintRef}
-      title="BUKTI PINJAMAN"
-      subtitle="Koperasi Merah Putih"
-      logoSrc="/logo-kabupaten-konawe.png"
-    >
-      <div className="space-y-6">
-        <div className="border-b pb-4">
-          <h2 className="text-lg font-bold">Data Pemohon</h2>
-          <div className="grid gap-2 mt-2 text-sm">
-            <div>NIK: {pinjaman.nik}</div>
-            <div>Nama: {pinjaman.name}</div>
-          </div>
-        </div>
-
-        <div className="border-b pb-4">
-          <h2 className="text-lg font-bold">Detail Pinjaman</h2>
-          <div className="grid gap-2 mt-2 text-sm">
-            <div>ID Pinjaman: {pinjaman.id}</div>
-            <div>Tanggal Pinjaman: {pinjaman.date}</div>
-            <div>Jumlah Pinjaman: {formatCurrency(pinjaman.amount)}</div>
-            <div>Tenor: {pinjaman.tenor}</div>
-            <div>Bunga per Bulan: {pinjaman.interest}</div>
-            <div>Cicilan per Bulan: {formatCurrency(pinjaman.installment)}</div>
-            <div>Total Dibayar: {formatCurrency(pinjaman.paid)}</div>
-            <div>Sisa Pinjaman: {formatCurrency(pinjaman.remaining)}</div>
-            <div>Status: {pinjaman.status}</div>
-            <div>Jatuh Tempo: {pinjaman.due}</div>
-          </div>
-        </div>
-
-        <div className="border-b pb-4">
-          <h2 className="text-lg font-bold">Keterangan</h2>
-          <p className="mt-2 text-sm">{pinjaman.purpose}</p>
-        </div>
-
-        <div className="mt-6">
-          <p className="text-sm">
-            Cetak ini sebagai bukti transaksi pinjaman. Simpan dengan baik.
-          </p>
-        </div>
+    <>
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-gray-50">
+        <button
+          onClick={() => {
+            handlePrint();
+          }}
+          className="mt-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-bold text-white"
+        >
+          Cetak Sekarang
+        </button>
+        <button
+          onClick={() => router.back()}
+          className="text-sm text-gray-500 hover:underline"
+        >
+          Batal, kembali
+        </button>
       </div>
-    </PrintLayout>
+
+      <div style={{ position: "fixed", top: "-9999px", left: "-9999px" }}>
+        <PrintContent loan={loan} member={member} printRef={printRef} />
+      </div>
+    </>
   );
 }

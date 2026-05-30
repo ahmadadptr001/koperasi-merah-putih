@@ -4,8 +4,9 @@ import {
   getSavingsTransactions,
   createSavingsTransaction,
 } from "@/services/savingsService";
+import { getSavingsAccounts } from "@/services/savingsService";
 import { okList, created, badRequest, serverError } from "@/lib/api-response";
-import type { SavingsTransactionType } from "@/lib/types";
+import type { SavingsTransactionType, SavingsAccountType } from "@/lib/types";
 
 export async function GET(req: NextRequest) {
   try {
@@ -36,21 +37,68 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    if (!body.savings_account_id)
-      return badRequest("savings_account_id wajib diisi");
     if (!body.member_id) return badRequest("member_id wajib diisi");
     if (!body.transaction_type)
       return badRequest("transaction_type wajib diisi");
     if (!body.amount || Number(body.amount) <= 0)
       return badRequest("amount harus lebih dari 0");
 
-    const validTypes: SavingsTransactionType[] = ["setoran", "penarikan"];
-    if (!validTypes.includes(body.transaction_type)) {
-      return badRequest(`transaction_type harus: ${validTypes.join(" atau ")}`);
+    const validTransactionTypes: SavingsTransactionType[] = [
+      "setoran",
+      "penarikan",
+    ];
+    if (!validTransactionTypes.includes(body.transaction_type)) {
+      return badRequest(
+        `transaction_type harus: ${validTransactionTypes.join(" atau ")}`,
+      );
+    }
+
+    // ── Resolve savings_account_id ──────────────────────────────────────────
+    // Page bisa kirim salah satu dari dua cara:
+    // 1. Kirim savings_account_id langsung (cara lama/eksplisit)
+    // 2. Kirim account_type ("pokok"|"wajib"|"sukarela") → resolve ke savings_account_id
+    //    yang aktif milik member tersebut
+    let savingsAccountId: string | undefined = body.savings_account_id;
+
+    if (!savingsAccountId && body.account_type) {
+      const validAccountTypes: SavingsAccountType[] = [
+        "pokok",
+        "wajib",
+        "sukarela",
+      ];
+      if (!validAccountTypes.includes(body.account_type)) {
+        return badRequest(
+          `account_type harus: ${validAccountTypes.join(", ")}`,
+        );
+      }
+
+      // Cari savings_account yang cocok untuk member + account_type ini
+      const accounts = await getSavingsAccounts({
+        member_id: body.member_id,
+        account_type: body.account_type as SavingsAccountType,
+        status: "active",
+      });
+
+      if (accounts.error) return serverError(accounts.error);
+      if (accounts.data.length === 0) {
+        return badRequest(
+          `Rekening simpanan ${body.account_type} tidak ditemukan atau tidak aktif untuk anggota ini. ` +
+            `Buat rekening ${body.account_type} terlebih dahulu melalui POST /api/savings-accounts.`,
+        );
+      }
+
+      // Ambil rekening pertama yang aktif (per member+type harusnya hanya 1)
+      savingsAccountId = accounts.data[0].id;
+    }
+
+    if (!savingsAccountId) {
+      return badRequest(
+        "Sediakan savings_account_id atau account_type (pokok/wajib/sukarela) untuk mengidentifikasi rekening.",
+      );
     }
 
     const result = await createSavingsTransaction({
-      savings_account_id: body.savings_account_id,
+      savings_account_id: savingsAccountId,
       member_id: body.member_id,
       transaction_type: body.transaction_type as SavingsTransactionType,
       amount: Number(body.amount),
@@ -63,6 +111,7 @@ export async function POST(req: NextRequest) {
     if (result.error) return serverError(result.error);
     return created(result.data, result.message);
   } catch (e) {
+    console.log("Error di POST /api/savings-transactions:", e);
     return serverError(e);
   }
 }

@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS public.members (
                    CHECK (status IN ('active', 'inactive', 'suspended')),
   photo_url      TEXT,
   notes          TEXT,
+  area           TEXT,
   created_by     UUID REFERENCES public.users(id),
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -145,24 +146,25 @@ CREATE INDEX IF NOT EXISTS idx_savings_txn_date ON public.savings_transactions(t
 CREATE TABLE IF NOT EXISTS public.loans (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   member_id         UUID NOT NULL REFERENCES public.members(id) ON DELETE RESTRICT,
-  loan_number       TEXT NOT NULL UNIQUE,   -- Nomor pinjaman, e.g. "PJM-2025-001"
-  amount            NUMERIC(15, 2) NOT NULL CHECK (amount > 0),  -- Pokok pinjaman
-  interest_rate     NUMERIC(5, 2) NOT NULL DEFAULT 1.5,  -- % per bulan
-  term_months       INTEGER NOT NULL CHECK (term_months > 0),   -- Jangka waktu (bulan)
-  monthly_payment   NUMERIC(15, 2) NOT NULL,   -- Angsuran per bulan
-  total_interest    NUMERIC(15, 2) NOT NULL,   -- Total bunga
-  total_payment     NUMERIC(15, 2) NOT NULL,   -- Total pembayaran
-  paid_amount       NUMERIC(15, 2) NOT NULL DEFAULT 0.00,  -- Sudah terbayar
+  loan_number       TEXT NOT NULL UNIQUE,
+  amount            NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
+  interest_rate     NUMERIC(5, 2) NOT NULL DEFAULT 1.5,
+  term_months       INTEGER NOT NULL CHECK (term_months > 0),
+  monthly_payment   NUMERIC(15, 2) NOT NULL,
+  total_interest    NUMERIC(15, 2) NOT NULL,
+  total_payment     NUMERIC(15, 2) NOT NULL,
+  paid_amount       NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
   remaining_amount  NUMERIC(15, 2) GENERATED ALWAYS AS (total_payment - paid_amount) STORED,
-  purpose           TEXT,                      -- Tujuan pinjaman
-  collateral        TEXT,                      -- Jaminan
+  purpose           TEXT,
+  collateral        TEXT,
   status            TEXT NOT NULL DEFAULT 'pending'
-                      CHECK (status IN ('pending', 'approved', 'rejected', 'active', 'completed', 'overdue')),
+                    CHECK (status IN ('pending', 'approved', 'rejected', 'active', 'completed', 'overdue')),
   applied_date      DATE NOT NULL DEFAULT CURRENT_DATE,
   approved_date     DATE,
-  disbursement_date DATE,                      -- Tanggal pencairan
-  due_date          DATE,                      -- Tanggal jatuh tempo akhir
+  disbursement_date DATE,
+  due_date          DATE,
   approved_by       UUID REFERENCES public.users(id),
+  requested_by      UUID REFERENCES public.users(id),
   notes             TEXT,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -213,16 +215,15 @@ CREATE INDEX IF NOT EXISTS idx_loan_payments_due_date ON public.loan_payments(du
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.approvals (
   id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  reference_type   TEXT NOT NULL
-                     CHECK (reference_type IN ('loan', 'savings_withdrawal', 'member_registration', 'member_update')),
-  reference_id     UUID NOT NULL,     -- ID dari tabel referensi (loan_id, savings_txn_id, dll)
-  title            TEXT NOT NULL,     -- Judul permohonan
+  reference_type   TEXT NOT NULL,
+  reference_id     UUID NOT NULL,
+  title            TEXT NOT NULL,
   description      TEXT,
-  status           TEXT NOT NULL DEFAULT 'pending'
-                     CHECK (status IN ('pending', 'approved', 'rejected', 'revision')),
+  amount           NUMERIC(15, 2),
+  status           TEXT NOT NULL DEFAULT 'pending',
   requested_by     UUID NOT NULL REFERENCES public.users(id),
   reviewed_by      UUID REFERENCES public.users(id),
-  review_notes     TEXT,              -- Catatan reviewer
+  review_notes     TEXT,
   reviewed_at      TIMESTAMPTZ,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -270,6 +271,7 @@ CREATE TABLE IF NOT EXISTS public.notification_prefs (
   new_member_notification   BOOLEAN NOT NULL DEFAULT FALSE,
   loan_approval_update      BOOLEAN NOT NULL DEFAULT TRUE,
   monthly_report            BOOLEAN NOT NULL DEFAULT FALSE,
+  push_notifications        BOOLEAN NOT NULL DEFAULT FALSE,
   reminder_days_before      INTEGER NOT NULL DEFAULT 3,  -- Hari pengingat sebelum jatuh tempo
   created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -280,7 +282,21 @@ CREATE TRIGGER notification_prefs_updated_at
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 -- ============================================================
--- 10. ROW LEVEL SECURITY (RLS)
+-- 10. TABEL NOTIFICATION_READS (Status Baca Notifikasi - BARU)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.notification_reads (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id      UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  approval_id  UUID NOT NULL REFERENCES public.approvals(id) ON DELETE CASCADE,
+  read_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id, approval_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_reads_user_id ON public.notification_reads(user_id);
+CREATE INDEX IF NOT EXISTS idx_notification_reads_approval_id ON public.notification_reads(approval_id);
+
+-- ============================================================
+-- 11. ROW LEVEL SECURITY (RLS)
 -- ============================================================
 
 -- Enable RLS pada semua tabel
@@ -293,6 +309,7 @@ ALTER TABLE public.loan_payments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.approvals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.financial_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notification_prefs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.notification_reads ENABLE ROW LEVEL SECURITY;
 
 -- Helper function: ambil role user saat ini
 CREATE OR REPLACE FUNCTION public.current_user_role()
@@ -405,8 +422,17 @@ CREATE POLICY "notif_prefs_insert" ON public.notification_prefs
 CREATE POLICY "notif_prefs_update" ON public.notification_prefs
   FOR UPDATE USING (user_id = auth.uid());
 
+-- ---- NOTIFICATION_READS policies ----
+CREATE POLICY "notification_reads_select" ON public.notification_reads
+  FOR SELECT USING (user_id = auth.uid());
+CREATE POLICY "notification_reads_insert" ON public.notification_reads
+  FOR INSERT WITH CHECK (user_id = auth.uid());
+CREATE POLICY "notification_reads_delete" ON public.notification_reads
+  FOR DELETE USING (user_id = auth.uid());
+
+
 -- ============================================================
--- 11. VIEWS BERGUNA (Optional)
+-- 12. VIEWS BERGUNA (Optional)
 -- ============================================================
 
 -- View: ringkasan anggota + total simpanan
@@ -442,7 +468,7 @@ WHERE lp.status IN ('pending', 'overdue')
   AND lp.due_date <= CURRENT_DATE + INTERVAL '7 days';
 
 -- ============================================================
--- 12. FUNGSI HELPER BISNIS
+-- 13. FUNGSI HELPER BISNIS
 -- ============================================================
 
 -- Auto-generate nomor anggota
@@ -538,4 +564,5 @@ $$ LANGUAGE plpgsql;
 -- 7. approvals
 -- 8. financial_transactions
 -- 9. notification_prefs
+-- 10. notification_reads (BARU)
 -- ============================================================

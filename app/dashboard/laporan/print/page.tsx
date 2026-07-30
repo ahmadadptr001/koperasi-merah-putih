@@ -133,7 +133,10 @@ export default function LaporanPrintPage() {
     <PrintLayout
       title="LAPORAN KEUANGAN"
       subtitle="Koperasi Merah Putih"
-      logoSrc="/konawe-logo.png"
+      // Nama file sebenarnya di /public adalah logo-kabupaten-konawe.png;
+      // "/konawe-logo.png" tidak pernah ada sehingga logo pada halaman cetak
+      // laporan selalu gagal dimuat (404).
+      logoSrc="/logo-kabupaten-konawe.png"
     >
       <div className="space-y-6">
         {/* Summary Cards */}

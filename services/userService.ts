@@ -24,14 +24,17 @@ export async function getUsers(params?: {
   if (params?.role) query = query.eq("role", params.role);
   if (params?.is_active !== undefined)
     query = query.eq("is_active", params.is_active);
-  if (params?.search)
-    query = query.or(
-      `full_name.ilike.%${params.search}%,email.ilike.%${params.search}%`,
-    );
+  if (params?.search) {
+    // Filter .or() dikirim sebagai string; koma/kurung pada input bisa
+    // mengubah struktur filter, jadi karakter khusus dibuang lebih dulu.
+    const term = params.search.replace(/[,()\\%_*"']/g, " ").trim();
+    if (term)
+      query = query.or(`full_name.ilike.%${term}%,email.ilike.%${term}%`);
+  }
 
   const { data, error, count } = await query;
   if (error) return { data: [], total: 0, error: error.message };
-  return { data: data as User[], total: count ?? 0, error: null };
+  return { data: (data ?? []) as User[], total: count ?? 0, error: null };
 }
 
 export async function getUserById(id: string): Promise<ApiResponse<User>> {
@@ -102,7 +105,13 @@ export async function createUserWithAuth(payload: {
     .select()
     .single();
 
-  if (updateError) return { data: null, error: updateError.message };
+  if (updateError) {
+    // Rollback: akun auth sudah terbentuk tapi profilnya gagal dilengkapi.
+    // Tanpa ini akun yatim tetap tertinggal di auth.users — emailnya
+    // "terpakai" sehingga admin tidak bisa membuat ulang akun tersebut.
+    await supabaseAdmin.auth.admin.deleteUser(userId);
+    return { data: null, error: updateError.message };
+  }
 
   return {
     data: data as User,
@@ -170,6 +179,20 @@ export async function deleteUserWithAuth(
   id: string,
 ): Promise<ApiResponse<null>> {
   const { error } = await supabaseAdmin.auth.admin.deleteUser(id);
-  if (error) return { data: null, error: error.message };
+
+  if (error) {
+    // loans.approved_by / requested_by menahan penghapusan (FK tanpa
+    // ON DELETE), jadi ubah pesan teknis menjadi keterangan yang berguna.
+    const isReferenced =
+      error.message.includes("foreign key") ||
+      error.message.includes("violates");
+    return {
+      data: null,
+      error: isReferenced
+        ? "Akun tidak bisa dihapus karena masih tercatat pada data pinjaman atau transaksi. Nonaktifkan akun ini saja."
+        : error.message,
+    };
+  }
+
   return { data: null, error: null, message: "Akun berhasil dihapus" };
 }

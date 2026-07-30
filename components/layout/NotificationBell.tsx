@@ -63,7 +63,8 @@ function notifColors(
 export function NotificationBell() {
   const colors = useColors();
   const { theme } = useTheme();
-  const isLight = theme === "light" || theme === "auto" || !theme;
+  // useTheme sudah menormalkan nilainya jadi "light" | "dark".
+  const isLight = theme !== "dark";
   const { user } = useAuth();
 
   const [open, setOpen] = useState(false);

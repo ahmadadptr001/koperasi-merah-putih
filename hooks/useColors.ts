@@ -4,8 +4,9 @@ import { useTheme } from "@/hooks/useTheme";
 
 export const useColors = () => {
   const { theme } = useTheme();
-  const isLight =
-    theme === "light" || theme === "auto" || theme === "" || theme === null;
+  // useTheme sudah menormalkan nilainya jadi "light" | "dark",
+  // jadi tidak perlu lagi menebak nilai "auto"/""/null.
+  const isLight = theme !== "dark";
 
   return {
     // ─── BRAND ───────────────────────────────────────────────

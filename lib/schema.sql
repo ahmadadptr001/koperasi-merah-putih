@@ -215,12 +215,15 @@ CREATE INDEX IF NOT EXISTS idx_loan_payments_due_date ON public.loan_payments(du
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.approvals (
   id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  reference_type   TEXT NOT NULL,
+  reference_type   TEXT NOT NULL
+                     CHECK (reference_type IN ('loan', 'savings_withdrawal',
+                                               'member_registration', 'member_update')),
   reference_id     UUID NOT NULL,
   title            TEXT NOT NULL,
   description      TEXT,
   amount           NUMERIC(15, 2),
-  status           TEXT NOT NULL DEFAULT 'pending',
+  status           TEXT NOT NULL DEFAULT 'pending'
+                     CHECK (status IN ('pending', 'approved', 'rejected', 'revision')),
   requested_by     UUID NOT NULL REFERENCES public.users(id),
   reviewed_by      UUID REFERENCES public.users(id),
   review_notes     TEXT,
@@ -472,50 +475,86 @@ WHERE lp.status IN ('pending', 'overdue')
 -- ============================================================
 
 -- Auto-generate nomor anggota
+--
+-- PENTING: SECURITY DEFINER wajib. Fungsi ini membaca tabel yang ber-RLS;
+-- tanpa SECURITY DEFINER, anggota biasa hanya "melihat" barisnya sendiri
+-- sehingga nomor urut yang dihasilkan bentrok dengan nomor milik orang lain.
+-- Nomor urut diambil dari MAX nomor terbit (bukan COUNT) agar penghapusan
+-- baris tidak menyebabkan nomor dipakai ulang.
 CREATE OR REPLACE FUNCTION public.generate_member_number()
-RETURNS TEXT AS $$
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
-  v_count INTEGER;
-  v_year TEXT;
+  v_prefix TEXT := 'KMP-' || TO_CHAR(NOW(), 'YYYY') || '-';
+  v_next   INTEGER;
 BEGIN
-  v_year := TO_CHAR(NOW(), 'YYYY');
-  SELECT COUNT(*) + 1 INTO v_count FROM public.members;
-  RETURN 'KMP-' || v_year || '-' || LPAD(v_count::TEXT, 4, '0');
+  SELECT COALESCE(MAX((SUBSTRING(member_number FROM '([0-9]+)$'))::INTEGER), 0) + 1
+    INTO v_next
+    FROM public.members
+   WHERE member_number LIKE v_prefix || '%';
+
+  RETURN v_prefix || LPAD(v_next::TEXT, 4, '0');
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 -- Auto-generate nomor pinjaman
 CREATE OR REPLACE FUNCTION public.generate_loan_number()
-RETURNS TEXT AS $$
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
-  v_count INTEGER;
-  v_year TEXT;
+  v_prefix TEXT := 'PJM-' || TO_CHAR(NOW(), 'YYYY') || '-';
+  v_next   INTEGER;
 BEGIN
-  v_year := TO_CHAR(NOW(), 'YYYY');
-  SELECT COUNT(*) + 1 INTO v_count FROM public.loans;
-  RETURN 'PJM-' || v_year || '-' || LPAD(v_count::TEXT, 4, '0');
+  SELECT COALESCE(MAX((SUBSTRING(loan_number FROM '([0-9]+)$'))::INTEGER), 0) + 1
+    INTO v_next
+    FROM public.loans
+   WHERE loan_number LIKE v_prefix || '%';
+
+  RETURN v_prefix || LPAD(v_next::TEXT, 4, '0');
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 -- Auto-generate nomor rekening simpanan
 CREATE OR REPLACE FUNCTION public.generate_savings_account_number(p_type TEXT)
-RETURNS TEXT AS $$
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
-  v_count INTEGER;
   v_prefix TEXT;
+  v_next   INTEGER;
 BEGIN
   v_prefix := CASE p_type
-    WHEN 'pokok'   THEN 'SPK'
-    WHEN 'wajib'   THEN 'SWB'
+    WHEN 'pokok'    THEN 'SPK'
+    WHEN 'wajib'    THEN 'SWB'
     WHEN 'sukarela' THEN 'SSK'
     ELSE 'SMP'
-  END;
-  SELECT COUNT(*) + 1 INTO v_count FROM public.savings_accounts WHERE account_type = p_type;
-  RETURN v_prefix || '-' || LPAD(v_count::TEXT, 6, '0');
+  END || '-';
+
+  SELECT COALESCE(MAX((SUBSTRING(account_number FROM '([0-9]+)$'))::INTEGER), 0) + 1
+    INTO v_next
+    FROM public.savings_accounts
+   WHERE account_number LIKE v_prefix || '%';
+
+  RETURN v_prefix || LPAD(v_next::TEXT, 6, '0');
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 -- Hitung jadwal angsuran pinjaman (mengembalikan tabel)
+--
+-- Angsuran terakhir menyerap sisa pembulatan sehingga:
+--   SUM(principal)    = loans.amount
+--   SUM(interest)     = loans.total_interest
+--   SUM(total_amount) = loans.total_payment
+-- Tanpa ini, pembayaran angsuran terakhir menyisakan selisih sen dan status
+-- pinjaman tidak pernah berubah menjadi 'completed'.
 CREATE OR REPLACE FUNCTION public.calculate_loan_schedule(
   p_loan_id UUID
 )
@@ -525,31 +564,69 @@ RETURNS TABLE (
   principal        NUMERIC,
   interest         NUMERIC,
   total_amount     NUMERIC
-) AS $$
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
-  v_loan RECORD;
-  v_monthly_principal NUMERIC;
-  v_monthly_interest  NUMERIC;
-  i INTEGER;
+  v_loan          RECORD;
+  v_start         DATE;
+  v_principal     NUMERIC;
+  v_interest      NUMERIC;
+  v_acc_principal NUMERIC := 0;
+  v_acc_interest  NUMERIC := 0;
+  i               INTEGER;
 BEGIN
   SELECT * INTO v_loan FROM public.loans WHERE id = p_loan_id;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Loan not found: %', p_loan_id;
   END IF;
 
-  v_monthly_principal := ROUND(v_loan.amount / v_loan.term_months, 2);
-  v_monthly_interest  := ROUND(v_loan.amount * (v_loan.interest_rate / 100), 2);
+  -- disbursement_date bisa masih NULL bila dipanggil sebelum pencairan;
+  -- tanpa COALESCE due_date jadi NULL → pelanggaran NOT NULL saat insert.
+  v_start := COALESCE(v_loan.disbursement_date, v_loan.approved_date, CURRENT_DATE);
+
+  v_principal := ROUND(v_loan.amount / v_loan.term_months, 2);
+  v_interest  := ROUND(v_loan.total_interest / v_loan.term_months, 2);
 
   FOR i IN 1..v_loan.term_months LOOP
     installment_no := i;
-    due_date       := v_loan.disbursement_date + (i || ' months')::INTERVAL;
-    principal      := v_monthly_principal;
-    interest       := v_monthly_interest;
-    total_amount   := v_monthly_principal + v_monthly_interest;
+    -- date + interval month otomatis dijepit ke akhir bulan
+    -- (31 Jan + 1 month = 28/29 Feb), tidak meluber seperti di JavaScript.
+    due_date := (v_start + (i || ' months')::INTERVAL)::DATE;
+
+    IF i < v_loan.term_months THEN
+      principal := v_principal;
+      interest  := v_interest;
+    ELSE
+      principal := ROUND(v_loan.amount - v_acc_principal, 2);
+      interest  := ROUND(v_loan.total_interest - v_acc_interest, 2);
+    END IF;
+
+    v_acc_principal := v_acc_principal + principal;
+    v_acc_interest  := v_acc_interest  + interest;
+
+    total_amount := principal + interest;
     RETURN NEXT;
   END LOOP;
 END;
-$$ LANGUAGE plpgsql;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.generate_member_number()              TO authenticated;
+GRANT EXECUTE ON FUNCTION public.generate_loan_number()                TO authenticated;
+GRANT EXECUTE ON FUNCTION public.generate_savings_account_number(TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.calculate_loan_schedule(UUID)         TO authenticated;
+
+-- Index pola prefix: btree default memakai collation locale sehingga tidak
+-- terpakai untuk LIKE 'PJM-2026-%'. text_pattern_ops menjaga generator tetap
+-- cepat saat data sudah banyak.
+CREATE INDEX IF NOT EXISTS idx_loans_loan_number_pattern
+  ON public.loans (loan_number text_pattern_ops);
+CREATE INDEX IF NOT EXISTS idx_members_member_number_pattern
+  ON public.members (member_number text_pattern_ops);
+CREATE INDEX IF NOT EXISTS idx_savings_accounts_number_pattern
+  ON public.savings_accounts (account_number text_pattern_ops);
 
 -- ============================================================
 -- SELESAI

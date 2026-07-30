@@ -27,13 +27,18 @@ export async function getApprovals(params?: {
     query = query.eq("reference_type", params.reference_type);
   if (params?.requested_by)
     query = query.eq("requested_by", params.requested_by);
-  if (params?.limit) query = query.limit(params.limit);
-  if (params?.offset && params?.limit)
-    query = query.range(params.offset, params.offset + params.limit - 1);
+  // range() sudah membatasi jumlah baris, jadi cukup salah satu saja.
+  // Sebelumnya offset diabaikan bila limit tidak dikirim → paginasi macet.
+  if (params?.offset) {
+    const limit = params.limit ?? 10;
+    query = query.range(params.offset, params.offset + limit - 1);
+  } else if (params?.limit) {
+    query = query.limit(params.limit);
+  }
 
   const { data, error, count } = await query;
   if (error) return { data: [], total: 0, error: error.message };
-  return { data: data as Approval[], total: count ?? 0, error: null };
+  return { data: (data ?? []) as Approval[], total: count ?? 0, error: null };
 }
 
 export async function getApprovalById(
@@ -100,6 +105,29 @@ export async function reviewApproval(
     .single();
 
   if (error) return { data: null, error: error.message };
+
+  const approval = data as Approval;
+
+  // Keputusan atas approval pinjaman harus ikut mengubah tabel `loans`,
+  // kalau tidak pinjaman tetap 'pending' walau pengurus sudah memutuskan
+  // dari daftar persetujuan / notifikasi.
+  if (
+    approval.reference_type === "loan" &&
+    (status === "approved" || status === "rejected")
+  ) {
+    const { error: loanErr } = await supabase
+      .from("loans")
+      .update({
+        status,
+        approved_by: reviewedBy,
+        approved_date: new Date().toISOString().slice(0, 10),
+        notes: reviewNotes ?? null,
+      })
+      .eq("id", approval.reference_id)
+      .eq("status", "pending");
+
+    if (loanErr) return { data: null, error: loanErr.message };
+  }
 
   const label =
     status === "approved"
@@ -173,21 +201,24 @@ export async function getApprovalsWithReadStatus(
   if (params?.requested_by)
     query = query.eq("requested_by", params.requested_by);
 
-  if (params?.limit) query = query.limit(params.limit);
-
-  if (params?.offset != null && params?.limit)
-    query = query.range(params.offset, params.offset + params.limit - 1);
+  if (params?.offset) {
+    const limit = params.limit ?? 10;
+    query = query.range(params.offset, params.offset + limit - 1);
+  } else if (params?.limit) {
+    query = query.limit(params.limit);
+  }
 
   const { data, error, count } = await query;
 
   if (error) return { data: [], total: 0, error: error.message };
 
   // Transformasi: jika ada notification_reads, berarti sudah dibaca
-  const dataWithRead = data.map((item: any) => ({
+  const rows = (data ?? []) as (Approval & { is_read?: unknown })[];
+  const dataWithRead = rows.map((item) => ({
     ...item,
     is_read: Array.isArray(item.is_read) // cek panjang array dengan benar
       ? item.is_read.length > 0
-      : !!item.is_read,
+      : Boolean(item.is_read),
   }));
 
   return {
@@ -209,9 +240,10 @@ export async function markApprovalAsRead(
       approval_id: approvalId,
       read_at: new Date().toISOString(),
     },
-    { onConflict: "user_id, approval_id" },
+    // Tanpa spasi: PostgREST memecah nilai on_conflict per koma, sehingga
+    // "user_id, approval_id" menghasilkan nama kolom " approval_id".
+    { onConflict: "user_id,approval_id" },
   );
-  console.log("markApprovalAsRead error:", error);
 
   if (error) return { data: null, error: error.message };
   return {
@@ -226,35 +258,27 @@ export async function markAllApprovalsAsRead(
 ): Promise<ApiResponse<null>> {
   const supabase = await createSupabaseServerClient();
 
-  // ✅ Ambil semua approval yang BELUM dibaca oleh user ini
-
-  const { data: alreadyRead } = await supabase
-
+  // Ambil semua approval yang BELUM dibaca oleh user ini
+  const { data: alreadyRead, error: readErr } = await supabase
     .from("notification_reads")
-
     .select("approval_id")
-
     .eq("user_id", userId);
 
-  const readIds = new Set((alreadyRead ?? []).map((r: any) => r.approval_id));
+  if (readErr) return { data: null, error: readErr.message };
+
+  const readIds = new Set((alreadyRead ?? []).map((r) => r.approval_id));
 
   const { data: approvals, error: fetchError } = await supabase
-
     .from("approvals")
-
     .select("id");
 
   if (fetchError) return { data: null, error: fetchError.message };
 
-  const insertData = approvals
-
+  const insertData = (approvals ?? [])
     .filter((app) => !readIds.has(app.id)) // skip yang sudah dibaca
-
     .map((app) => ({
       user_id: userId,
-
       approval_id: app.id,
-
       read_at: new Date().toISOString(),
     }));
 

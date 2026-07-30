@@ -4,6 +4,7 @@ import {
   getLoanById,
   updateLoan,
   approveLoan,
+  rejectLoan,
   disburseLoan,
   deleteLoan,
 } from "@/services/loanService";
@@ -33,6 +34,20 @@ export async function PUT(req: NextRequest, { params }: Params) {
       if (!body.approved_by)
         return badRequest("approved_by wajib untuk approval");
       const result = await approveLoan(id, body.approved_by, body.notes);
+      if (result.error) return serverError(result.error);
+      return ok(result.data, result.message);
+    }
+
+    // Shortcut untuk penolakan — mencatat siapa yang menolak sekaligus
+    // menutup baris approval terkait.
+    if (body.action === "reject") {
+      if (!body.reviewed_by && !body.approved_by)
+        return badRequest("reviewed_by wajib untuk penolakan");
+      const result = await rejectLoan(
+        id,
+        body.reviewed_by ?? body.approved_by,
+        body.notes,
+      );
       if (result.error) return serverError(result.error);
       return ok(result.data, result.message);
     }

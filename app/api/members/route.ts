@@ -1,13 +1,7 @@
 // app/api/members/route.ts
 import { NextRequest } from "next/server";
 import { getMembers, createMember } from "@/services/memberService";
-import {
-  ok,
-  okList,
-  created,
-  badRequest,
-  serverError,
-} from "@/lib/api-response";
+import { okList, created, badRequest, serverError } from "@/lib/api-response";
 import type { MemberStatus, MemberGender } from "@/lib/types";
 
 export async function GET(req: NextRequest) {
@@ -16,6 +10,7 @@ export async function GET(req: NextRequest) {
     const result = await getMembers({
       status: (searchParams.get("status") as MemberStatus) || undefined,
       search: searchParams.get("search") || undefined,
+      user_id: searchParams.get("user_id") || undefined,
       limit: searchParams.get("limit")
         ? Number(searchParams.get("limit"))
         : undefined,

@@ -17,6 +17,13 @@ export async function GET(req: NextRequest) {
       status:
         (searchParams.get("status") as "active" | "inactive" | "closed") ||
         undefined,
+      user_id: searchParams.get("user_id") || undefined,
+      limit: searchParams.get("limit")
+        ? Number(searchParams.get("limit"))
+        : undefined,
+      offset: searchParams.get("offset")
+        ? Number(searchParams.get("offset"))
+        : undefined,
     });
     if (result.error) return serverError(result.error);
     return okList(result.data, result.total);

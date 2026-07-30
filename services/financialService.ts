@@ -29,14 +29,19 @@ export async function getFinancialTransactions(params?: {
   if (params?.from_date)
     query = query.gte("transaction_date", params.from_date);
   if (params?.to_date) query = query.lte("transaction_date", params.to_date);
-  if (params?.limit) query = query.limit(params.limit);
-  if (params?.offset && params?.limit)
-    query = query.range(params.offset, params.offset + params.limit - 1);
+  // range() sudah membatasi jumlah baris, jadi cukup salah satu saja.
+  // Sebelumnya offset diabaikan bila limit tidak dikirim → paginasi macet.
+  if (params?.offset) {
+    const limit = params.limit ?? 10;
+    query = query.range(params.offset, params.offset + limit - 1);
+  } else if (params?.limit) {
+    query = query.limit(params.limit);
+  }
 
   const { data, error, count } = await query;
   if (error) return { data: [], total: 0, error: error.message };
   return {
-    data: data as FinancialTransaction[],
+    data: (data ?? []) as FinancialTransaction[],
     total: count ?? 0,
     error: null,
   };
@@ -102,9 +107,10 @@ export async function getLaporanRingkasan(
 
   if (error) return { data: null, error: error.message };
 
-  const ringkasan = (
-    data as Pick<FinancialTransaction, "transaction_type" | "amount">[]
-  ).reduce(
+  const ringkasan = ((data ?? []) as Pick<
+    FinancialTransaction,
+    "transaction_type" | "amount"
+  >[]).reduce(
     (acc, row) => {
       if (row.transaction_type === "pemasukan") {
         acc.total_pemasukan += Number(row.amount);

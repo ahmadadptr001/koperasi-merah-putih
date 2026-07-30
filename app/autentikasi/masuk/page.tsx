@@ -10,7 +10,7 @@ import { Eye, EyeOff, Building, LogIn } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useColors } from "@/hooks/useColors";
-import { supabaseBrowser } from "@/lib/supabase/client";
+import { supabaseBrowser, setRememberMe } from "@/lib/supabase/client";
 import Swal from "sweetalert2";
 
 const loginSchema = z.object({
@@ -39,6 +39,13 @@ export default function Masuk() {
   const onLogin = async (data: LoginValues) => {
     setIsLoading(true);
     try {
+      // 0. Terapkan pilihan "Ingat saya di perangkat ini" SEBELUM login.
+      //    Preferensi ini menentukan apakah cookie sesi diberi Max-Age
+      //    (bertahan setelah browser ditutup) atau menjadi cookie sesi biasa.
+      //    Sebelumnya nilai checkbox ini sama sekali tidak dipakai, sehingga
+      //    fiturnya tidak berpengaruh apa pun.
+      setRememberMe(Boolean(data.rememberMe));
+
       // 1. Login ke Supabase Auth
       const { error, data: authData } =
         await supabaseBrowser.auth.signInWithPassword({
@@ -90,13 +97,24 @@ export default function Masuk() {
         return;
       }
 
-      // 4. Login berhasil, redirect ke dashboard
-      router.replace("/dashboard");
-    } catch (err: any) {
+      // 4. Login berhasil. Lanjutkan ke halaman tujuan awal bila pengguna
+      //    tadi diarahkan ke sini oleh proxy (?next=...).
+      //    refresh() membuang Router Cache agar Server Component membaca
+      //    cookie sesi yang baru, bukan versi anonim yang sudah ter-cache.
+      // Dibaca dari window (bukan useSearchParams) agar halaman ini tetap
+      // bisa di-prerender statis tanpa perlu Suspense boundary.
+      const next = new URLSearchParams(window.location.search).get("next");
+      // Hanya terima path internal dashboard — cegah open redirect.
+      const target = next?.startsWith("/dashboard") ? next : "/dashboard";
+      router.replace(target);
+      router.refresh();
+    } catch (err) {
       await Swal.fire({
         title: "Terjadi Kesalahan",
         text:
-          err.message || "Tidak dapat terhubung ke server. Silakan coba lagi.",
+          err instanceof Error
+            ? err.message
+            : "Tidak dapat terhubung ke server. Silakan coba lagi.",
         icon: "error",
         confirmButtonColor: colors.primary,
       });

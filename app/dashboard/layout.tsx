@@ -1,7 +1,7 @@
 "use client";
 import HeaderLayout from "@/components/layout/HeaderLayout";
 import SidebarLayout from "@/components/layout/SidebarLayout";
-import type { Metadata } from "next";
+import { useColors } from "@/hooks/useColors";
 import { useState } from "react";
 
 export default function DashboardLayout({
@@ -9,10 +9,17 @@ export default function DashboardLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const colors = useColors();
   const [showSidebarMobile, setShowSidebarMobile] = useState(false);
 
   return (
-    <main className="min-h-screen bg-[#fcf5f4]">
+    // Latar diambil dari token tema. Sebelumnya dipaku ke `bg-[#fcf5f4]`
+    // (pink terang), sehingga pada tema gelap seluruh area di luar konten
+    // tetap terang dan tampak belang terhadap header serta sidebar.
+    <main
+      className="min-h-screen"
+      style={{ backgroundColor: colors.background }}
+    >
       <HeaderLayout
         showSidebarMobile={showSidebarMobile}
         setShowSidebarMobile={setShowSidebarMobile}

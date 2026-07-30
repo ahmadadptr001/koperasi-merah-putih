@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useColors } from "@/hooks/useColors";
+import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { User } from "@/lib/types";
@@ -89,7 +90,9 @@ export default function HalamanPengaturan() {
   const [profileErrors, setProfileErrors] = useState<
     Partial<Record<keyof ProfileForm, string>>
   >({});
-  const [theme, setTheme] = useState<ThemeMode>("light");
+  // Tema dibaca dari store bersama, bukan state lokal — supaya header,
+  // sidebar, dan popup profil ikut berubah tanpa reload halaman.
+  const { theme, setTheme } = useTheme();
   const [successMessage, setSuccessMessage] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -124,9 +127,8 @@ export default function HalamanPengaturan() {
           phone: userData.phone || "",
         });
         setCurrentAvatarUrl(userData.avatar_url || null);
-
-        const savedTheme = localStorage.getItem("theme");
-        if (savedTheme === "dark") setTheme("dark");
+        // Tema tidak perlu dibaca ulang di sini — useTheme sudah membacanya
+        // dari localStorage dan membagikannya ke seluruh aplikasi.
       } catch (err) {
         console.error("Error fetching settings:", err);
         await Swal.fire({
@@ -334,13 +336,13 @@ export default function HalamanPengaturan() {
   // ── Theme ──────────────────────────────────────────────────────────────────
 
   const handleThemeChange = (newTheme: ThemeMode) => {
+    // setTheme sudah menyimpan ke localStorage dan menandai elemen <html>.
+    // Reload paksa yang lama tidak diperlukan lagi: seluruh komponen yang
+    // memakai useTheme/useColors langsung ikut berubah.
     setTheme(newTheme);
-    localStorage.setItem("theme", newTheme);
-    document.documentElement.className = newTheme;
     showSuccess(
       `Tema ${newTheme === "light" ? "terang" : "gelap"} diterapkan.`,
     );
-    window.setTimeout(() => window.location.reload(), 450);
   };
 
   // ── Loading ──────────────────────────────────────────────────────────────

@@ -329,22 +329,37 @@ export default function HalamanAjukanPinjaman() {
         throw new Error(json.error ?? `Server error (${res.status})`);
       }
 
-      await fetch("/api/approvals", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          reference_type: "loan",
-          reference_id: json.data.id,
-          title: `Pengajuan Pinjaman ${json.data.loan_number}`,
-          description: `Jumlah: ${data.amount}, Tenor: ${data.tenor} bulan`,
-          requested_by: user?.id,
-        }),
-      });
+      // Pinjaman sudah tersimpan. Approval adalah langkah terpisah — kalau
+      // gagal, pengurus tidak akan melihat notifikasi persetujuan. Jangan
+      // ditelan diam-diam seperti sebelumnya.
+      let approvalFailed = false;
+      try {
+        const approvalRes = await fetch("/api/approvals", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            reference_type: "loan",
+            reference_id: json.data.id,
+            title: `Pengajuan Pinjaman ${json.data.loan_number}`,
+            description: `Jumlah: ${data.amount}, Tenor: ${data.tenor} bulan`,
+            amount: data.amount,
+            requested_by: user?.id,
+          }),
+        });
+        const approvalJson = await approvalRes.json();
+        approvalFailed = !approvalRes.ok || Boolean(approvalJson.error);
+      } catch {
+        approvalFailed = true;
+      }
 
       await Swal.fire({
-        icon: "success",
-        title: "Pengajuan Berhasil!",
-        text: `Nomor pinjaman: ${json.data?.loan_number ?? ""}. Menunggu persetujuan pengurus.`,
+        icon: approvalFailed ? "warning" : "success",
+        title: approvalFailed
+          ? "Pinjaman Tersimpan, Notifikasi Gagal"
+          : "Pengajuan Berhasil!",
+        text: approvalFailed
+          ? `Pinjaman ${json.data?.loan_number ?? ""} sudah tersimpan, tetapi permintaan persetujuan gagal dibuat. Mohon hubungi pengurus agar pengajuan Anda diproses.`
+          : `Nomor pinjaman: ${json.data?.loan_number ?? ""}. Menunggu persetujuan pengurus.`,
         confirmButtonColor: colors.primary,
         confirmButtonText: "Lihat Daftar Pinjaman",
       });

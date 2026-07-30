@@ -1,4 +1,3 @@
-import { notFound } from 'next/navigation';
 import PrintLayout from '@/components/print/PrintLayout';
 
 // We'll reuse the same data and helper functions from the laporan page for simplicity.
@@ -150,8 +149,7 @@ export default function LaporanPrintPage() {
                   <h3 className="mt-1 text-2xl font-bold text-gray-900">{card.value}</h3>
                 </div>
                 <div className="rounded-lg p-2" style={{ backgroundColor: `${card.color}20` }}>
-                  {/* We are not using the icon in this mock for simplicity, but you can add it if you import the icons */}
-                  {/* <Icon size={22} /> -->*/
+                  {/* Ikon sengaja tidak dipakai di halaman cetak. */}
                 </div>
               </div>
               <p className="text-sm font-semibold" style={{ color: card.color }}>
@@ -206,7 +204,7 @@ export default function LaporanPrintPage() {
                   />
                 </div>
               </div>
-            )}
+            ))}
           </div>
         </div>
 
@@ -238,7 +236,7 @@ export default function LaporanPrintPage() {
                       </td>
                       <td className="px-4 py-2">
                         <p className="flex items-center gap-1 text-sm font-bold text-gray-600">
-                          {/* <ReceiptText size={13} /> -->} {item.category}
+                          {item.category}
                         </p>
                       </td>
                       <td className="px-4 py-2">

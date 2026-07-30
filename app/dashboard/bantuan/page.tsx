@@ -189,8 +189,8 @@ const guideSections = [
 export default function HalamanBantuan() {
   const colors = useColors();
   const { theme } = useTheme();
-  const isLight =
-    theme == "light" || theme == "auto" || theme == "" || theme == null;
+  // useTheme sudah menormalkan nilainya jadi "light" | "dark".
+  const isLight = theme !== "dark";
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("semua");
   const [openFAQ, setOpenFAQ] = useState<string | null>(null);

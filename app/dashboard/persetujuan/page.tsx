@@ -368,15 +368,16 @@ export default function HalamanPersetujuan() {
     setLoading(true);
     setFetchError(null);
     try {
+      // Endpoint /api/loans hanya mengenal member_id/status/search/limit/offset.
+      // `reference_type` dan `user_id` sebelumnya dikirim ke sini padahal itu
+      // parameter tabel approvals — diabaikan server dan menyesatkan pembaca.
       const params = new URLSearchParams({
         limit: String(PAGE_SIZE),
         offset: String(page * PAGE_SIZE),
         status: "pending",
-        reference_type: "loan",
       });
       if (debouncedSearch) params.set("search", debouncedSearch);
 
-      params.set("user_id", user?.id || "");
       const res = await fetch(`/api/loans?${params}`);
       if (!res.ok) throw new Error(`Gagal memuat data (${res.status})`);
       const json = await res.json();
@@ -502,7 +503,8 @@ export default function HalamanPersetujuan() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          status: "rejected",
+          action: "reject",
+          reviewed_by: user.id,
           notes: "Ditolak oleh pengurus",
         }),
       });

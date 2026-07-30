@@ -6,7 +6,12 @@ type PrintLayoutProps = {
   subtitle?: string;
   logoSrc: string;
   showLogo?: boolean;
-  elementPrintRef: any;
+  /**
+   * Ref opsional ke container cetak, dipakai pemanggil yang menjalankan
+   * react-to-print. Halaman cetak yang dibuka langsung di tab sendiri
+   * (mis. /dashboard/laporan/print) tidak memerlukannya.
+   */
+  elementPrintRef?: React.Ref<HTMLDivElement>;
 };
 
 export default function PrintLayout({

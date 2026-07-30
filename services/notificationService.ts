@@ -11,13 +11,17 @@ export async function getNotificationPrefByUserId(
   userId: string,
 ): Promise<ApiResponse<NotificationPref>> {
   const supabase = await createSupabaseServerClient();
+  // maybeSingle(): baris preferensi hanya dibuat ketika pengguna pertama kali
+  // menyimpan pengaturan. Dengan .single(), pengguna yang belum pernah
+  // menyimpan akan mendapat error PGRST116 ("no rows returned") — padahal
+  // "belum ada preferensi" adalah kondisi normal, bukan kegagalan.
   const { data, error } = await supabase
     .from("notification_prefs")
     .select("*")
     .eq("user_id", userId)
-    .single();
+    .maybeSingle();
   if (error) return { data: null, error: error.message };
-  return { data: data as NotificationPref, error: null };
+  return { data: (data as NotificationPref) ?? null, error: null };
 }
 
 export async function getNotificationPrefById(

@@ -1,24 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useColors } from "@/hooks/useColors";
 import { useTheme } from "@/hooks/useTheme";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import Swal from "sweetalert2";
+// Ikon notifikasi sudah pindah ke NotificationBell; sisanya tidak terpakai.
 import {
   UserCircle,
-  Bell,
-  CheckCheck,
   ChevronDown,
   Settings,
   LogOut,
-  User,
-  Shield,
-  CreditCard,
-  AlertCircle,
-  Info,
-  CheckCircle2,
-  X,
+  Loader2,
 } from "lucide-react";
 import type { User as UserType } from "@/lib/types";
 import { NotificationBell } from "@/components/layout/NotificationBell";
@@ -28,6 +22,8 @@ import { NotificationBell } from "@/components/layout/NotificationBell";
 interface ProfileData extends Pick<UserType, "full_name" | "avatar_url"> {
   email?: string;
   role?: string;
+  /** Dipakai sebagai cache-buster avatar; berubah setiap profil disimpan. */
+  updated_at?: string;
 }
 
 // ─── Profile Dropdown ─────────────────────────────────────────────────────────
@@ -35,15 +31,32 @@ interface ProfileData extends Pick<UserType, "full_name" | "avatar_url"> {
 function ProfileDropdown({
   profile,
   colors,
-  isLight,
 }: {
   profile: ProfileData | null;
   colors: ReturnType<typeof useColors>;
-  isLight: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  /**
+   * URL avatar + cache-buster.
+   *
+   * Sebelumnya `Date.now()` dipanggil langsung di dalam JSX, sehingga setiap
+   * render menghasilkan URL baru: browser mengunduh ulang gambar terus-terusan
+   * dan avatar berkedip. Sekarang penanda diambil dari `updated_at` profil —
+   * nilainya berubah tepat ketika profil (termasuk foto) disimpan ulang, jadi
+   * cache tetap terpakai selama foto tidak diganti.
+   */
+  const avatarSrc = useMemo(() => {
+    if (!profile?.avatar_url) return null;
+    const sep = profile.avatar_url.includes("?") ? "&" : "?";
+    const version = profile.updated_at ?? "";
+    return version
+      ? `${profile.avatar_url}${sep}v=${encodeURIComponent(version)}`
+      : profile.avatar_url;
+  }, [profile?.avatar_url, profile?.updated_at]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -53,6 +66,50 @@ function ProfileDropdown({
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  // Tutup dropdown dengan Escape — sebelumnya hanya bisa lewat klik di luar.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  /**
+   * Logout.
+   *
+   * Sebelumnya hanya `supabaseBrowser.auth.signOut()` tanpa await dan tanpa
+   * navigasi: sesi terhapus di background tapi pengguna tetap berada di
+   * dashboard dengan data lama di layar, sehingga tombol "Keluar" terlihat
+   * seperti tidak berfungsi. Selain itu kegagalan signOut tidak terlihat.
+   */
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      const { error } = await supabaseBrowser.auth.signOut();
+      if (error) throw error;
+
+      setOpen(false);
+      // replace agar tombol "back" tidak mengembalikan ke dashboard.
+      router.replace("/autentikasi/masuk");
+      // Buang cache Router Cache milik segmen dashboard.
+      router.refresh();
+    } catch (err) {
+      setSigningOut(false);
+      await Swal.fire({
+        icon: "error",
+        title: "Gagal Keluar",
+        text:
+          err instanceof Error
+            ? err.message
+            : "Tidak dapat mengakhiri sesi. Coba lagi.",
+        confirmButtonColor: colors.primary,
+      });
+    }
+  };
 
   const menuItems = [
     {
@@ -81,10 +138,10 @@ function ProfileDropdown({
         }}
       >
         {/* Avatar */}
-        {profile?.avatar_url ? (
+        {avatarSrc ? (
           <img
-            src={profile.avatar_url + `?t=${Date.now()}`}
-            alt={profile.full_name ?? "Profil"}
+            src={avatarSrc}
+            alt={profile?.full_name ?? "Profil"}
             style={{
               width: 28,
               height: 28,
@@ -156,17 +213,19 @@ function ProfileDropdown({
       {/* Dropdown */}
       {open && (
         <div
+          role="menu"
           style={{
             position: "absolute",
             top: "calc(100% + 8px)",
             right: 0,
             width: 280,
-            background: colors.background,
+            // surface, bukan background: panel harus terbaca mengambang di
+            // atas halaman. Sebelumnya sewarna dengan latar halaman sehingga
+            // popup terlihat menyatu / rata di kedua tema.
+            background: colors.surface,
             border: `1px solid ${colors.border}`,
             borderRadius: 16,
-            boxShadow: isLight
-              ? "0 8px 32px rgba(0,0,0,0.12)"
-              : "0 8px 32px rgba(0,0,0,0.4)",
+            boxShadow: colors.shadow,
             zIndex: 1000,
             overflow: "hidden",
           }}
@@ -175,15 +234,18 @@ function ProfileDropdown({
           <div
             style={{
               padding: "16px",
+              // Sedikit tint merah brand agar kepala popup punya hierarki
+              // visual, konsisten di tema terang maupun gelap.
+              background: colors.backgroundAccent,
               borderBottom: `1px solid ${colors.border}`,
             }}
           >
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
               {/* Avatar large */}
-              {profile?.avatar_url ? (
+              {avatarSrc ? (
                 <img
-                  src={profile.avatar_url + `?t=${Date.now()}`}
-                  alt={profile.full_name ?? "Profil"}
+                  src={avatarSrc}
+                  alt={profile?.full_name ?? "Profil"}
                   style={{
                     width: 48,
                     height: 48,
@@ -230,7 +292,7 @@ function ProfileDropdown({
                     style={{
                       margin: "1px 0 0",
                       fontSize: 12,
-                      color: colors.mutedGray ?? colors.textPrimary,
+                      color: colors.textSecondary,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
@@ -249,6 +311,8 @@ function ProfileDropdown({
                   }}
                 >
                   {/* Online badge */}
+                  {/* Warna badge diambil dari token tema, bukan hex manual,
+                      supaya konsisten dengan komponen lain di kedua tema. */}
                   <span
                     style={{
                       display: "flex",
@@ -256,8 +320,9 @@ function ProfileDropdown({
                       gap: 4,
                       fontSize: 11,
                       fontWeight: 600,
-                      background: isLight ? "#EBFBEE" : "#0e2e20",
-                      color: isLight ? "#2F9E44" : "#69db7c",
+                      background: colors.accentGreen,
+                      color: colors.success,
+                      border: `1px solid ${colors.success}33`,
                       borderRadius: 999,
                       padding: "2px 8px",
                     }}
@@ -267,7 +332,7 @@ function ProfileDropdown({
                         width: 6,
                         height: 6,
                         borderRadius: "50%",
-                        background: isLight ? "#2F9E44" : "#69db7c",
+                        background: colors.success,
                       }}
                     />
                     Online
@@ -279,8 +344,10 @@ function ProfileDropdown({
                       style={{
                         fontSize: 11,
                         fontWeight: 600,
-                        background: isLight ? "#E8F4FD" : "#1a2d45",
-                        color: isLight ? "#1971C2" : "#74c0fc",
+                        textTransform: "capitalize",
+                        background: colors.accentBlue,
+                        color: colors.info,
+                        border: `1px solid ${colors.info}33`,
                         borderRadius: 999,
                         padding: "2px 8px",
                       }}
@@ -310,15 +377,18 @@ function ProfileDropdown({
                   textAlign: "left",
                   transition: "background 0.12s",
                 }}
+                // surfaceHover: sebelumnya memakai colors.surface yang kini
+                // sewarna panel, jadi hover tidak terlihat sama sekali.
                 onMouseEnter={(e) =>
                   ((e.currentTarget as HTMLButtonElement).style.background =
-                    colors.surface)
+                    colors.surfaceHover)
                 }
                 onMouseLeave={(e) =>
                   ((e.currentTarget as HTMLButtonElement).style.background =
                     "transparent")
                 }
                 onClick={() => {
+                  setOpen(false);
                   router.push(path);
                 }}
               >
@@ -352,7 +422,7 @@ function ProfileDropdown({
                     style={{
                       margin: 0,
                       fontSize: 11,
-                      color: colors.mutedGray ?? colors.textPrimary,
+                      color: colors.textSecondary,
                     }}
                   >
                     {sublabel}
@@ -370,6 +440,8 @@ function ProfileDropdown({
             }}
           >
             <button
+              type="button"
+              disabled={signingOut}
               style={{
                 width: "100%",
                 display: "flex",
@@ -378,34 +450,43 @@ function ProfileDropdown({
                 padding: "9px 16px",
                 background: "transparent",
                 border: "none",
-                cursor: "pointer",
+                cursor: signingOut ? "wait" : "pointer",
+                opacity: signingOut ? 0.7 : 1,
                 textAlign: "left",
                 transition: "background 0.12s",
               }}
               onMouseEnter={(e) =>
                 ((e.currentTarget as HTMLButtonElement).style.background =
-                  isLight ? "#FFF5F5" : "#2c1a1a")
+                  colors.errorLight)
               }
               onMouseLeave={(e) =>
                 ((e.currentTarget as HTMLButtonElement).style.background =
                   "transparent")
               }
-              onClick={() => supabaseBrowser.auth.signOut()}
+              onClick={handleSignOut}
             >
               <div
                 style={{
                   width: 32,
                   height: 32,
                   borderRadius: 8,
-                  border: `1px solid ${isLight ? "#FFC9C9" : "#5c2020"}`,
-                  background: isLight ? "#FFF5F5" : "#2c1a1a",
+                  border: `1px solid ${colors.error}55`,
+                  background: colors.errorLight,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   flexShrink: 0,
                 }}
               >
-                <LogOut size={15} color={isLight ? "#E03131" : "#ff8787"} />
+                {signingOut ? (
+                  <Loader2
+                    size={15}
+                    color={colors.error}
+                    className="animate-spin"
+                  />
+                ) : (
+                  <LogOut size={15} color={colors.error} />
+                )}
               </div>
               <div>
                 <p
@@ -413,16 +494,16 @@ function ProfileDropdown({
                     margin: 0,
                     fontSize: 13,
                     fontWeight: 600,
-                    color: isLight ? "#E03131" : "#ff8787",
+                    color: colors.error,
                   }}
                 >
-                  Keluar
+                  {signingOut ? "Mengeluarkan…" : "Keluar"}
                 </p>
                 <p
                   style={{
                     margin: 0,
                     fontSize: 11,
-                    color: colors.mutedGray ?? colors.textPrimary,
+                    color: colors.textSecondary,
                   }}
                 >
                   Akhiri sesi aktif
@@ -462,7 +543,7 @@ export default function HeaderLayout({
 
       const { data } = await supabaseBrowser
         .from("users")
-        .select("full_name, avatar_url, email, role")
+        .select("full_name, avatar_url, email, role, updated_at")
         .eq("id", authUser.id)
         .single();
 
@@ -533,7 +614,7 @@ export default function HeaderLayout({
         <NotificationBell />
 
         {/* Profile Dropdown */}
-        <ProfileDropdown profile={profile} colors={colors} isLight={isLight} />
+        <ProfileDropdown profile={profile} colors={colors} />
       </div>
     </header>
   );

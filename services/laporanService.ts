@@ -30,7 +30,13 @@ export async function getLaporanBulanan(
   if (bulan) {
     // Query untuk satu bulan tertentu
     const startDate = `${tahun}-${String(bulan).padStart(2, "0")}-01`;
-    const endDate = new Date(tahun, bulan, 0).toISOString().slice(0, 10);
+    // Date.UTC, bukan new Date(tahun, bulan, 0): konstruktor lokal
+    // menghasilkan tengah malam waktu lokal, lalu toISOString menggesernya
+    // ke UTC. Di zona WIB/WITA (UTC+7/+8) hasilnya jadi tanggal sebelumnya,
+    // sehingga transaksi pada hari TERAKHIR bulan itu hilang dari laporan.
+    const endDate = new Date(Date.UTC(tahun, bulan, 0))
+      .toISOString()
+      .slice(0, 10);
     query = query
       .gte("transaction_date", startDate)
       .lte("transaction_date", endDate);
@@ -53,7 +59,13 @@ export async function getLaporanBulanan(
     { pemasukan: number; pengeluaran: number }
   > = {};
 
-  data.forEach((tx: any) => {
+  type TxRow = {
+    transaction_type: string;
+    amount: number | string;
+    transaction_date: string;
+  };
+
+  ((data ?? []) as TxRow[]).forEach((tx) => {
     const month = tx.transaction_date.slice(0, 7); // YYYY-MM
     if (!monthlyData[month]) {
       monthlyData[month] = { pemasukan: 0, pengeluaran: 0 };
@@ -92,7 +104,7 @@ export async function getLaporanRingkasanPeriode(
 
   if (error) return { data: null, error: error.message };
 
-  const ringkasan = data.reduce(
+  const ringkasan = (data ?? []).reduce(
     (acc, tx) => {
       if (tx.transaction_type === "pemasukan") {
         acc.total_pemasukan += Number(tx.amount);
